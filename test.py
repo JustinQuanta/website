@@ -45,7 +45,7 @@ if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
 # ==========================================
 # 2. BUDGET INGESTION & CASHFLOW
 # ==========================================
-st.header("1. Cash Flow & Budget Configuration")
+st.header("1. Estimated Monthly Budget Cost")
 
 tab_manual, tab_upload = st.tabs(["Manual Monthly Budget", "Upload Excel Template"])
 
@@ -120,7 +120,7 @@ st.metric("Total Monthly Baseline Expenses", f"${baseline_monthly_expenses:,.2f}
 # ==========================================
 # 3. MILESTONES & STRESS-TEST EVENTS
 # ==========================================
-st.header("2. Major Life Events & Financial Bumps")
+st.header("2. Anticipated Life Events & Financial Bumps")
 
 # --- UPGRADE: Complex Real Estate & Amortization UI ---
 with st.expander("➕ Add an Event (House, Wedding, Job Loss, Crash)", expanded=False):
@@ -207,7 +207,7 @@ if st.session_state.events:
 # ==========================================
 # 4. SIMULATION ENGINE (Monte Carlo + Baseline)
 # ==========================================
-st.header("3. Run Wealth Projection Engine")
+st.header("3. Long Run Equity Estimated Return")
 
 col_m1, col_m2 = st.columns(2)
 with col_m1:
