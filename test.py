@@ -35,12 +35,12 @@ if residency == "Singaporean/PR (CPF)":
     include_cpf_in_nw = st.sidebar.checkbox("Include CPF in Target Net Worth", value=True)
 
 st.sidebar.header("2. Starting Asset Balances")
-cash_balance = st.sidebar.number_input("Liquid Cash / Emergency Fund ($)", min_value=0, value=25000, step=5000)
-invested_balance = st.sidebar.number_input("Invested Portfolio ($)", min_value=0, value=60000, step=5000)
+cash_balance = st.sidebar.number_input("Liquid Cash / Emergency Fund ($)", min_value=0, value=0, step=5000)
+invested_balance = st.sidebar.number_input("Invested Portfolio ($)", min_value=0, value=0, step=5000)
 
 cpf_balance = 0
 if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
-    cpf_balance = st.sidebar.number_input("Current CPF Balance ($)", min_value=0, value=35000, step=5000)
+    cpf_balance = st.sidebar.number_input("Current CPF Balance ($)", min_value=0, value=0, step=5000)
 
 # ==========================================
 # 2. BUDGET INGESTION & CASHFLOW
@@ -61,7 +61,6 @@ with tab_manual:
         entertainment = st.number_input("Discretionary / Leisure ($)", min_value=0, value=250, step=50)
         other_exp = st.number_input("Insurance ($)", min_value=0, value=300, step=50)
     
-    # --- UPGRADE 1: Standardized Custom Spending UI ---
     st.markdown("##### Custom Discretionary Spending")
     
     with st.expander("➕ Add Custom Spending Category", expanded=False):
@@ -90,7 +89,7 @@ with tab_manual:
                 st.session_state.custom_spending.pop(i)
                 st.rerun()
                 
-        st.write("") # Spacer
+        st.write("") 
         if st.button("🗑️ Clear All Categories"):
             st.session_state.custom_spending = []
             st.rerun()
@@ -122,36 +121,62 @@ st.metric("Total Monthly Baseline Expenses", f"${baseline_monthly_expenses:,.2f}
 # 3. MILESTONES & STRESS-TEST EVENTS
 # ==========================================
 st.header("2. Major Life Events & Financial Bumps")
-st.caption("💡 **Tip:** If adding a Property Downpayment, remember that your post-purchase 'Rent' will likely convert to a 'Mortgage'. Ensure your baseline budget reflects this blended average.")
 
-# --- UPGRADE 2: Standardized Event UI ---
+# --- UPGRADE: Complex Real Estate & Amortization UI ---
 with st.expander("➕ Add an Event (House, Wedding, Job Loss, Crash)", expanded=False):
-    col_e1, col_e2, col_e3, col_e4 = st.columns([1, 2, 2, 1])
+    col_e1, col_e2 = st.columns(2)
     with col_e1:
         ev_year = st.number_input("Event Year", min_value=2026, max_value=2065, value=2028)
     with col_e2:
         ev_type = st.selectbox("Event Category", [
             "Market Recession (Drawdown)", 
-            "Property Downpayment / Capex", 
-            "Job Loss / Income Sabbatical"
+            "Property Purchase (Auto-Mortgage)", 
+            "Job Loss / Income Sabbatical",
+            "One-off Expense (Wedding, etc.)"
         ])
-    with col_e3:
-        if ev_type == "Market Recession (Drawdown)":
-            ev_val = st.slider("Equity Drawdown (%)", min_value=-60, max_value=-5, value=-25, step=5)
-        elif ev_type == "Property Downpayment / Capex":
-            ev_val = st.number_input("One-off Outflow (Today's $)", min_value=0, value=80000, step=5000)
-        else:
-            ev_val = st.slider("Duration without Income (Months)", min_value=1, max_value=12, value=4)
-    with col_e4:
-        st.write("")
-        st.write("")
-        if st.button("Add Event"):
-            st.session_state.events.append({
-                "Year": ev_year,
-                "Type": ev_type,
-                "Magnitude": ev_val
-            })
-            st.rerun()
+        
+    if ev_type == "Property Purchase (Auto-Mortgage)":
+        col_p1, col_p2, col_p3 = st.columns(3)
+        with col_p1:
+            prop_val = st.number_input("Property Value (Today's $)", min_value=0, value=600000, step=10000)
+            dp_pct = st.slider("Downpayment (%)", min_value=0, max_value=100, value=25)
+        with col_p2:
+            mortgage_rate = st.number_input("Mortgage Rate (%)", min_value=0.0, value=2.5, step=0.1)
+            tenure = st.number_input("Loan Tenure (Years)", min_value=1, max_value=35, value=25)
+        with col_p3:
+            st.info("💡 Monthly mortgage will be auto-calculated.")
+            auto_replace_rent = st.checkbox("Stop paying baseline rent after purchase?", value=True, help="Automatically subtracts your baseline Rent from your expenses once this mortgage starts.")
+            st.write("")
+            if st.button("Add Property Event"):
+                st.session_state.events.append({
+                    "Year": ev_year,
+                    "Type": ev_type,
+                    "PropVal": prop_val,
+                    "DP_Pct": dp_pct,
+                    "Rate": mortgage_rate,
+                    "Tenure": tenure,
+                    "AutoReplaceRent": auto_replace_rent
+                })
+                st.rerun()
+    else:
+        col_n1, col_n2 = st.columns([3, 1])
+        with col_n1:
+            if ev_type == "Market Recession (Drawdown)":
+                ev_val = st.slider("Equity Drawdown (%)", min_value=-60, max_value=-5, value=-25, step=5)
+            elif ev_type == "One-off Expense (Wedding, etc.)":
+                ev_val = st.number_input("Outflow (Today's $)", min_value=0, value=30000, step=1000)
+            else:
+                ev_val = st.slider("Duration without Income (Months)", min_value=1, max_value=12, value=4)
+        with col_n2:
+            st.write("")
+            st.write("")
+            if st.button("Add Event"):
+                st.session_state.events.append({
+                    "Year": ev_year,
+                    "Type": ev_type,
+                    "Magnitude": ev_val
+                })
+                st.rerun()
 
 if st.session_state.events:
     st.markdown("#### Your Scheduled Events")
@@ -161,7 +186,9 @@ if st.session_state.events:
         
         if event["Type"] == "Market Recession (Drawdown)":
             val_display = f"{event['Magnitude']}% Drop"
-        elif event["Type"] == "Property Downpayment / Capex":
+        elif event["Type"] == "Property Purchase (Auto-Mortgage)":
+            val_display = f"${event['PropVal']:,} Property ({event['DP_Pct']}% DP, {event['Tenure']} Yr Loan)"
+        elif event["Type"] == "One-off Expense (Wedding, etc.)":
             val_display = f"${event['Magnitude']:,}"
         else:
             val_display = f"{event['Magnitude']} Months"
@@ -172,7 +199,7 @@ if st.session_state.events:
             st.session_state.events.pop(i)
             st.rerun()
             
-    st.write("") # Spacer
+    st.write("") 
     if st.button("🗑️ Clear All Events"):
         st.session_state.events = []
         st.rerun()
@@ -215,17 +242,20 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
     capex_dict = defaultdict(float)
     recession_dict = {}
     jobloss_dict = defaultdict(int)
+    property_events = defaultdict(list)
     
+    # --- UPGRADE: Map Property Events ---
     for e in st.session_state.events:
-        if e["Type"] == "Property Downpayment / Capex":
+        if e["Type"] == "One-off Expense (Wedding, etc.)":
             capex_dict[e["Year"]] += e["Magnitude"]
         elif e["Type"] == "Market Recession (Drawdown)":
             recession_dict[e["Year"]] = e["Magnitude"] / 100
         elif e["Type"] == "Job Loss / Income Sabbatical":
             jobloss_dict[e["Year"]] += e["Magnitude"]
+        elif e["Type"] == "Property Purchase (Auto-Mortgage)":
+            property_events[e["Year"]].append(e)
 
     all_trajectories = np.zeros((sim_iterations, num_steps))
-    
     initial_total_nw = cash_balance + invested_balance + (cpf_balance if include_cpf_in_nw else 0)
     all_trajectories[:, 0] = initial_total_nw
     
@@ -237,6 +267,7 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
         curr_exp = baseline_monthly_expenses
 
         recovering_from_crash = False
+        active_mortgage = 0 # Track fixed-cost mortgages separately from inflated expenses
 
         for t in range(1, num_steps):
             sim_year = years_array[t]
@@ -244,6 +275,36 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
             curr_sal *= (1 + salary_growth)
             curr_exp *= (1 + inflation_rate)
             
+            # --- UPGRADE: Trigger Amortization Math ---
+            if sim_year in property_events:
+                for p_event in property_events[sim_year]:
+                    years_from_start = sim_year - 2026
+                    inflated_prop_val = p_event["PropVal"] * ((1 + inflation_rate) ** years_from_start)
+                    dp_amount = inflated_prop_val * (p_event["DP_Pct"] / 100)
+                    loan_amount = inflated_prop_val - dp_amount
+                    
+                    # Deduct Downpayment
+                    if curr_cash >= dp_amount:
+                        curr_cash -= dp_amount
+                    else:
+                        deficit = dp_amount - curr_cash
+                        curr_cash = 0
+                        curr_invest = max(0, curr_invest - deficit)
+                    
+                    # Compute standard amortization M
+                    r = (p_event["Rate"] / 100) / 12
+                    n = p_event["Tenure"] * 12
+                    if r > 0 and n > 0:
+                        monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1)
+                    else:
+                        monthly_mortgage = loan_amount / n if n > 0 else 0
+                        
+                    active_mortgage += monthly_mortgage
+                    
+                    # Subtracted replaced rent from the compounding baseline
+                    if p_event.get("AutoReplaceRent", False):
+                        inflated_rent = rent_mortgage * ((1 + inflation_rate) ** years_from_start)
+                        curr_exp = max(0, curr_exp - inflated_rent)
             months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
                 
             if residency == "Singaporean/PR (CPF)":
@@ -256,20 +317,18 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                 annual_takehome = curr_sal * months_worked
                 curr_cpf = 0
             
-            annual_living_costs = curr_exp * 12
+            annual_living_costs = (curr_exp + active_mortgage) * 12
             annual_savings = max(0, annual_takehome - annual_living_costs)
             
             if sim_year in recession_dict:
                 shock = recession_dict[sim_year]
                 curr_invest = max(0, curr_invest * (1 + shock))
                 recovering_from_crash = True  
-                
             else:
                 if enable_random_recessions and np.random.random() < recession_prob:
                     random_shock = np.random.uniform(max_drawdown, -0.10)
                     curr_invest = max(0, curr_invest * (1 + random_shock))
                     recovering_from_crash = True  
-                    
                 else:
                     z = np.random.normal(0, 1)
                     current_mu = expected_market_return
@@ -306,7 +365,7 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
         "Worst-Case": p10,
         "Median Trajectory": p50,
         "Best-Case": p90,
-        "Targeted Net Worth": [target_nw] * num_steps
+        "Target Net Worth": [target_nw] * num_steps
     }).set_index("Age")
 
     st.subheader("Simulated Wealth Trajectory")
