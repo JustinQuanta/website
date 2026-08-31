@@ -1,12 +1,13 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import altair as alt
 from collections import defaultdict
 
-st.set_page_config(page_title="Net Worth Monte Carlo Forecaster", layout="wide")
+st.set_page_config(page_title="Wealth & Retirement Forecaster", layout="wide")
 
-st.title("📈 Advanced Net Worth & Goal Forecaster")
-st.caption("Institutional-grade wealth trajectory simulation with macroeconomic shocks & cashflow constraints.")
+st.title("📈 Wealth & Retirement Forecaster")
+st.caption("Plan your financial future by simulating life events, market crashes, and property purchases.")
 
 # --- Initialize Session States ---
 if "events" not in st.session_state:
@@ -17,7 +18,7 @@ if "custom_spending" not in st.session_state:
 # ==========================================
 # 1. SIDEBAR: Profile & Asset Starting Point
 # ==========================================
-st.sidebar.header("1. Core Profile & Baseline")
+st.sidebar.header("1. Your Basic Profile (Start Here)")
 col_sb1, col_sb2 = st.sidebar.columns(2)
 with col_sb1:
     current_age = st.number_input("Current Age", min_value=18, max_value=80, value=30)
@@ -28,15 +29,15 @@ with col_sb2:
     target_nw = st.number_input("Net Worth Target ($)", min_value=0, value=1_000_000, step=50_000)
     inflation_rate = st.number_input("Inflation (% p.a.)", min_value=0.0, max_value=15.0, value=2.5, step=0.25) / 100
 
-residency = st.sidebar.selectbox("Residency / Pension Status", ["Singaporean/PR (CPF)", "WP/EP/SP (No CPF)"])
+residency = st.sidebar.selectbox("Work Status in Singapore (Determines CPF)", ["Singaporean/PR (CPF)", "WP/EP/SP (No CPF)"])
 
 include_cpf_in_nw = False
 if residency == "Singaporean/PR (CPF)":
     include_cpf_in_nw = st.sidebar.checkbox("Include CPF in Target Net Worth", value=True)
 
-st.sidebar.header("2. Starting Asset Balances")
+st.sidebar.header("2. Current Savings & Investments")
 cash_balance = st.sidebar.number_input("Liquid Cash / Emergency Fund ($)", min_value=0, value=0, step=5000)
-invested_balance = st.sidebar.number_input("Invested Portfolio ($)", min_value=0, value=0, step=5000)
+invested_balance = st.sidebar.number_input("Invested Portfolio (Stocks/ETFs) ($)", min_value=0, value=0, step=5000)
 
 cpf_balance = 0
 if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
@@ -45,7 +46,7 @@ if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
 # ==========================================
 # 2. BUDGET INGESTION & CASHFLOW
 # ==========================================
-st.header("1. Estimated Monthly Budget Cost")
+st.header("3. Estimated Monthly Budget Cost")
 
 tab_manual, tab_upload = st.tabs(["Manual Monthly Budget", "Upload Excel Template"])
 
@@ -61,9 +62,7 @@ with tab_manual:
         entertainment = st.number_input("Discretionary / Leisure ($)", min_value=0, value=250, step=50)
         other_exp = st.number_input("Insurance ($)", min_value=0, value=300, step=50)
     
-    st.markdown("##### Custom Discretionary Spending")
-    
-    with st.expander("➕ Add Custom Spending Category", expanded=False):
+    with st.expander("➕ Add Extra Monthly Expenses (Optional)", expanded=False):
         col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
         with col_c1:
             new_cat_name = st.text_input("Category Name", value="Gym & Subscriptions")
@@ -97,6 +96,9 @@ with tab_manual:
         custom_spending_total = sum(item["Amount"] for item in st.session_state.custom_spending)
 
     baseline_monthly_expenses = rent_mortgage + food_bev + utilities_bills + transport_travel + entertainment + other_exp + custom_spending_total
+    
+    st.markdown("##### Monthly Savings & Investing Plan")
+    monthly_investment = st.number_input("Amount to Invest in Stocks Monthly ($)", min_value=0, value=1000, step=100, help="This is the portion of your leftover cash you want to put into the market. Anything else will go straight to your bank/cash savings.")
 
 with tab_upload:
     st.info("Template columns required: `Month_Year`, `Category`, `Amount`, `Cashflow_Type` (Inflow / Outflow)")
@@ -110,32 +112,54 @@ with tab_upload:
                 outflows = df_budget[df_budget['Cashflow_Type'].str.strip().str.lower() == 'outflow']['Amount'].sum()
                 st.success(f"File verified! Detected monthly outflows: ${outflows:,.2f}")
                 baseline_monthly_expenses = outflows
+                monthly_investment = st.number_input("Amount to Invest in Stocks Monthly ($)", min_value=0, value=1000, step=100)
             else:
                 st.error(f"Missing required columns. Schema must contain: {req_cols}")
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-st.metric("Total Monthly Baseline Expenses", f"${baseline_monthly_expenses:,.2f}")
+# --- UPGRADE: Dynamic Take-Home Pay & Budget Validation ---
+if residency == "Singaporean/PR (CPF)":
+    ow_subject_to_cpf = min(current_salary, 8000)
+    employee_cpf_deduction = ow_subject_to_cpf * 0.20
+    take_home_pay = current_salary - employee_cpf_deduction
+else:
+    take_home_pay = current_salary
+
+total_outflow = baseline_monthly_expenses + monthly_investment
+surplus_cash = take_home_pay - total_outflow
+
+st.write("---")
+col_met1, col_met2, col_met3 = st.columns(3)
+col_met1.metric("Take-Home Pay (After CPF)", f"${take_home_pay:,.2f}")
+col_met2.metric("Total Baseline Expenses", f"${baseline_monthly_expenses:,.2f}")
+col_met3.metric("Target Monthly Invest", f"${monthly_investment:,.2f}")
+
+valid_budget = True
+if surplus_cash < 0:
+    st.error(f"🚨 **Budget Deficit Detected!** Your expenses and investments (${total_outflow:,.2f}) exceed your take-home pay by **\${abs(surplus_cash):,.2f}** a month. Please reduce your expenses or investment amount. The simulation cannot run with a negative cash flow.")
+    valid_budget = False
+elif surplus_cash > 0:
+    st.info(f"💡 **Uninvested Cash:** You have **${surplus_cash:,.2f}** left over every month. This money will automatically be swept into your liquid Bank/Emergency fund (growing at your safe cash yield rate) instead of the stock market.")
 
 # ==========================================
 # 3. MILESTONES & STRESS-TEST EVENTS
 # ==========================================
-st.header("2. Anticipated Life Events & Financial Bumps")
+st.header("4. Plan for Big Life Events (Optional)")
 
-# --- UPGRADE: Complex Real Estate & Amortization UI ---
-with st.expander("➕ Add an Event (House, Wedding, Job Loss, Crash)", expanded=False):
+with st.expander("➕ Add an Event (Optional: House, Job Loss, Crash)", expanded=False):
     col_e1, col_e2 = st.columns(2)
     with col_e1:
         ev_year = st.number_input("Event Year", min_value=2026, max_value=2065, value=2028)
     with col_e2:
         ev_type = st.selectbox("Event Category", [
-            "Market Recession (Drawdown)", 
-            "Property Purchase (Auto-Mortgage)", 
-            "Job Loss / Income Sabbatical",
-            "One-off Expense (Wedding, etc.)"
+            "Market Crash (Stock Market Drop)", 
+            "Property Purchase", 
+            "Job Loss / Career Break",
+            "Large One-Off Purchase (Wedding, Car, etc.)"
         ])
         
-    if ev_type == "Property Purchase (Auto-Mortgage)":
+    if ev_type == "Property Purchase":
         col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
             prop_val = st.number_input("Property Value (Today's $)", min_value=0, value=600000, step=10000)
@@ -161,9 +185,9 @@ with st.expander("➕ Add an Event (House, Wedding, Job Loss, Crash)", expanded=
     else:
         col_n1, col_n2 = st.columns([3, 1])
         with col_n1:
-            if ev_type == "Market Recession (Drawdown)":
+            if ev_type == "Market Crash (Stock Market Drop)":
                 ev_val = st.slider("Equity Drawdown (%)", min_value=-60, max_value=-5, value=-25, step=5)
-            elif ev_type == "One-off Expense (Wedding, etc.)":
+            elif ev_type == "Large One-Off Purchase (Wedding, Car, etc.)":
                 ev_val = st.number_input("Outflow (Today's $)", min_value=0, value=30000, step=1000)
             else:
                 ev_val = st.slider("Duration without Income (Months)", min_value=1, max_value=12, value=4)
@@ -184,11 +208,11 @@ if st.session_state.events:
     for i, event in enumerate(st.session_state.events):
         col_ev1, col_ev2 = st.columns([5, 1])
         
-        if event["Type"] == "Market Recession (Drawdown)":
+        if event["Type"] == "Market Crash (Stock Market Drop)":
             val_display = f"{event['Magnitude']}% Drop"
-        elif event["Type"] == "Property Purchase (Auto-Mortgage)":
+        elif event["Type"] == "Property Purchase":
             val_display = f"${event['PropVal']:,} Property ({event['DP_Pct']}% DP, {event['Tenure']} Yr Loan)"
-        elif event["Type"] == "One-off Expense (Wedding, etc.)":
+        elif event["Type"] == "Large One-Off Purchase (Wedding, Car, etc.)":
             val_display = f"${event['Magnitude']:,}"
         else:
             val_display = f"{event['Magnitude']} Months"
@@ -207,15 +231,17 @@ if st.session_state.events:
 # ==========================================
 # 4. SIMULATION ENGINE (Monte Carlo + Baseline)
 # ==========================================
-st.header("3. Long Run Equity Estimated Return")
+st.header("5. Market Assumptions & Simulation")
 
-col_m1, col_m2 = st.columns(2)
+col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
-    expected_market_return = st.number_input("Expected Equity Return (% p.a.)", value=7.5, step=0.5) / 100
+    expected_market_return = st.number_input("Expected Equity Return (% p.a.)", value=10.5, step=0.5) / 100
 with col_m2:
-    market_volatility = st.number_input("Market Volatility ($\sigma$ % p.a.)", min_value=0.0, value=16.0, step=1.0) / 100
+    market_volatility = st.number_input("Expected Market Swings / Volatility (% per year)", min_value=0.0, value=20.0, step=1.0) / 100
+with col_m3:
+    cash_yield = st.number_input("Cash Yield / Bank Rate (% p.a.)", min_value=0.0, value=1.5, step=0.1) / 100
 
-st.subheader("Stochastic Recession Settings")
+st.subheader("Random Market Crashes (Stress Test)")
 col_r1, col_r2, col_r3, col_r4 = st.columns(4)
 with col_r1:
     enable_random_recessions = st.checkbox("Enable Random Market Crashes", value=True)
@@ -224,13 +250,17 @@ with col_r2:
 with col_r3:
     max_drawdown = st.slider("Maximum Drawdown Limit (%)", min_value=-80, max_value=-15, value=-40) / 100
 with col_r4:
-    recovery_multiplier = st.slider("Post-Crash Recovery Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
+    recovery_multiplier = st.slider("Market Bounce-Back (Multiplier after a crash)", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
 
 with st.expander("⚙️ Advanced Engine Settings (Tune Iterations)"):
-    sim_iterations = st.number_input("Monte Carlo Iterations", min_value=1000, max_value=500000, value=100000, step=10000)
+    sim_iterations = st.number_input("Monte Carlo Iterations", min_value=10000, max_value=500000, value=100000, step=10000)
     st.caption("Note: Running 100,000+ paths provides extreme statistical accuracy but may take a few seconds to process.")
 
-if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
+st.subheader("How do you want to view your results?")
+display_mode = st.radio("Display Projection In:", ["Future Value (Without factoring in inflation)", "Today's Value (Adjusted for inflation)"], horizontal=True)
+
+# Disable the execute button if the budget constraint fails
+if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budget):
     
     with st.spinner(f"Computing {sim_iterations:,} alternate timelines..."):
         
@@ -244,17 +274,18 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
     jobloss_dict = defaultdict(int)
     property_events = defaultdict(list)
     
-    # --- UPGRADE: Map Property Events ---
+    # Map Events
     for e in st.session_state.events:
-        if e["Type"] == "One-off Expense (Wedding, etc.)":
+        if e["Type"] == "Large One-Off Purchase (Wedding, Car, etc.)":
             capex_dict[e["Year"]] += e["Magnitude"]
-        elif e["Type"] == "Market Recession (Drawdown)":
+        elif e["Type"] == "Market Crash (Stock Market Drop)":
             recession_dict[e["Year"]] = e["Magnitude"] / 100
-        elif e["Type"] == "Job Loss / Income Sabbatical":
+        elif e["Type"] == "Job Loss / Career Break":
             jobloss_dict[e["Year"]] += e["Magnitude"]
-        elif e["Type"] == "Property Purchase (Auto-Mortgage)":
+        elif e["Type"] == "Property Purchase":
             property_events[e["Year"]].append(e)
 
+    # --- THE MONTE CARLO ENGINE (INVESTMENT FOCUSED) ---
     all_trajectories = np.zeros((sim_iterations, num_steps))
     initial_total_nw = cash_balance + invested_balance + (cpf_balance if include_cpf_in_nw else 0)
     all_trajectories[:, 0] = initial_total_nw
@@ -267,7 +298,7 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
         curr_exp = baseline_monthly_expenses
 
         recovering_from_crash = False
-        active_mortgage = 0 # Track fixed-cost mortgages separately from inflated expenses
+        active_mortgage = 0 
 
         for t in range(1, num_steps):
             sim_year = years_array[t]
@@ -275,7 +306,6 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
             curr_sal *= (1 + salary_growth)
             curr_exp *= (1 + inflation_rate)
             
-            # --- UPGRADE: Trigger Amortization Math ---
             if sim_year in property_events:
                 for p_event in property_events[sim_year]:
                     years_from_start = sim_year - 2026
@@ -283,7 +313,6 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                     dp_amount = inflated_prop_val * (p_event["DP_Pct"] / 100)
                     loan_amount = inflated_prop_val - dp_amount
                     
-                    # Deduct Downpayment
                     if curr_cash >= dp_amount:
                         curr_cash -= dp_amount
                     else:
@@ -291,7 +320,6 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                         curr_cash = 0
                         curr_invest = max(0, curr_invest - deficit)
                     
-                    # Compute standard amortization M
                     r = (p_event["Rate"] / 100) / 12
                     n = p_event["Tenure"] * 12
                     if r > 0 and n > 0:
@@ -301,10 +329,10 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                         
                     active_mortgage += monthly_mortgage
                     
-                    # Subtracted replaced rent from the compounding baseline
                     if p_event.get("AutoReplaceRent", False):
                         inflated_rent = rent_mortgage * ((1 + inflation_rate) ** years_from_start)
                         curr_exp = max(0, curr_exp - inflated_rent)
+
             months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
                 
             if residency == "Singaporean/PR (CPF)":
@@ -318,7 +346,11 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                 curr_cpf = 0
             
             annual_living_costs = (curr_exp + active_mortgage) * 12
-            annual_savings = max(0, annual_takehome - annual_living_costs)
+            annual_surplus = max(0, annual_takehome - annual_living_costs)
+            
+            planned_investment = monthly_investment * 12
+            actual_investment = min(planned_investment, annual_surplus)
+            actual_cash_savings = annual_surplus - actual_investment
             
             if sim_year in recession_dict:
                 shock = recession_dict[sim_year]
@@ -339,8 +371,8 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
                     annual_return = np.exp((current_mu - 0.5 * market_volatility**2) + market_volatility * z) - 1
                     curr_invest = max(0, curr_invest * (1 + annual_return))
             
-            curr_cash *= 1.015 
-            curr_invest += annual_savings
+            curr_cash = (curr_cash * (1 + cash_yield)) + actual_cash_savings 
+            curr_invest += actual_investment
             
             if sim_year in capex_dict:
                 years_from_start = sim_year - 2026
@@ -356,29 +388,151 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
             step_nw = curr_cash + curr_invest + (curr_cpf if include_cpf_in_nw else 0)
             all_trajectories[sim, t] = step_nw
 
+    # Calculate Percentiles
     p10 = np.percentile(all_trajectories, 10, axis=0)
     p50 = np.percentile(all_trajectories, 50, axis=0)
     p90 = np.percentile(all_trajectories, 90, axis=0)
-    
+
+    # --- THE 100% CASH ENGINE (DETERMINISTIC BASELINE) ---
+    cash_only_trajectory = np.zeros(num_steps)
+    cash_only_cash = cash_balance + invested_balance 
+    cash_only_cpf = cpf_balance
+    cash_only_sal = current_salary
+    cash_only_exp = baseline_monthly_expenses
+    cash_only_active_mortgage = 0
+    cash_only_trajectory[0] = cash_only_cash + (cash_only_cpf if include_cpf_in_nw else 0)
+
+    for t in range(1, num_steps):
+        sim_year = years_array[t]
+        
+        cash_only_sal *= (1 + salary_growth)
+        cash_only_exp *= (1 + inflation_rate)
+        
+        if sim_year in property_events:
+            for p_event in property_events[sim_year]:
+                years_from_start = sim_year - 2026
+                inflated_prop_val = p_event["PropVal"] * ((1 + inflation_rate) ** years_from_start)
+                dp_amount = inflated_prop_val * (p_event["DP_Pct"] / 100)
+                loan_amount = inflated_prop_val - dp_amount
+                
+                if cash_only_cash >= dp_amount:
+                    cash_only_cash -= dp_amount
+                else:
+                    cash_only_cash = 0
+                
+                r = (p_event["Rate"] / 100) / 12
+                n = p_event["Tenure"] * 12
+                if r > 0 and n > 0:
+                    monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1)
+                else:
+                    monthly_mortgage = loan_amount / n if n > 0 else 0
+                    
+                cash_only_active_mortgage += monthly_mortgage
+                
+                if p_event.get("AutoReplaceRent", False):
+                    inflated_rent = rent_mortgage * ((1 + inflation_rate) ** years_from_start)
+                    cash_only_exp = max(0, cash_only_exp - inflated_rent)
+
+        months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
+            
+        if residency == "Singaporean/PR (CPF)":
+            ow_subject_to_cpf = min(cash_only_sal, 8000)
+            employee_cpf_deduction = ow_subject_to_cpf * 0.20
+            total_annual_cpf_contrib = (ow_subject_to_cpf * 0.37) * months_worked
+            cash_only_cpf = (cash_only_cpf * 1.03) + total_annual_cpf_contrib 
+            annual_takehome = (cash_only_sal - employee_cpf_deduction) * months_worked
+        else:
+            annual_takehome = cash_only_sal * months_worked
+            cash_only_cpf = 0
+        
+        annual_living_costs = (cash_only_exp + cash_only_active_mortgage) * 12
+        annual_surplus = max(0, annual_takehome - annual_living_costs)
+        
+        cash_only_cash = (cash_only_cash * (1 + cash_yield)) + annual_surplus 
+        
+        if sim_year in capex_dict:
+            years_from_start = sim_year - 2026
+            inflated_capex = capex_dict[sim_year] * ((1 + inflation_rate) ** years_from_start)
+            
+            if cash_only_cash >= inflated_capex:
+                cash_only_cash -= inflated_capex
+            else:
+                cash_only_cash = 0
+        
+        cash_only_trajectory[t] = cash_only_cash + (cash_only_cpf if include_cpf_in_nw else 0)
+
+    # --- APPLY INFLATION DISCOUNT IF "REAL DOLLARS" SELECTED ---
+    if "Today's Value" in display_mode:
+        discount_factors = (1 + inflation_rate) ** np.arange(num_steps)
+        p10 = p10 / discount_factors
+        p50 = p50 / discount_factors
+        p90 = p90 / discount_factors
+        cash_only_trajectory = cash_only_trajectory / discount_factors
+
     df_results = pd.DataFrame({
         "Age": ages_array,
         "Worst-Case": p10,
         "Median Trajectory": p50,
         "Best-Case": p90,
-        "Target Net Worth": [target_nw] * num_steps
-    }).set_index("Age")
+        "Target Net Worth": [target_nw] * num_steps,
+        "100% Cash": cash_only_trajectory
+    }).round(0)
 
     st.subheader("Simulated Wealth Trajectory")
-    st.line_chart(df_results)
+    
+    # --- ALTAIR SHADED FAN CHART WITH LEGEND ---
+    df_lines = df_results[["Age", "Median Trajectory", "100% Cash", "Target Net Worth"]].melt("Age", var_name="Scenario", value_name="Net Worth")
+    
+    color_scale = alt.Scale(
+        domain=["Median Trajectory", "100% Cash", "Target Net Worth"],
+        range=["#3182bd", "#7f8c8d", "#e74c3c"] 
+    )
+    
+    lines = alt.Chart(df_lines).mark_line().encode(
+        x=alt.X("Age:Q", axis=alt.Axis(tickMinStep=1, format="d")),
+        y=alt.Y("Net Worth:Q", axis=alt.Axis(format="$,.0f")),
+        color=alt.Color("Scenario:N", scale=color_scale, legend=alt.Legend(title="Trajectory", orient="bottom")),
+        strokeDash=alt.condition(
+            alt.datum.Scenario == "Target Net Worth",
+            alt.value([5, 5]),
+            alt.value([0])
+        ),
+        size=alt.condition(
+            alt.datum.Scenario == "Median Trajectory",
+            alt.value(3),
+            alt.value(2)
+        ),
+        tooltip=[
+            alt.Tooltip("Age:Q", title="Age"),
+            alt.Tooltip("Scenario:N", title="Scenario"),
+            alt.Tooltip("Net Worth:Q", format="$,.0f", title="Net Worth")
+        ]
+    )
+    
+    area = alt.Chart(df_results).mark_area(opacity=0.2, color="#3182bd").encode(
+        x=alt.X("Age:Q"),
+        y=alt.Y("Worst-Case:Q", title="Net Worth ($)"),
+        y2="Best-Case:Q",
+        tooltip=[
+            alt.Tooltip("Age:Q", title="Age"),
+            alt.Tooltip("Best-Case:Q", format="$,.0f", title="Best-Case (90th %ile)"),
+            alt.Tooltip("Worst-Case:Q", format="$,.0f", title="Worst-Case (10th %ile)")
+        ]
+    )
+    
+    chart = (area + lines).interactive()
+    st.altair_chart(chart, width='stretch')
 
     final_median = p50[-1]
     final_p10 = p10[-1]
+    final_cash = cash_only_trajectory[-1]
     prob_success = np.mean(all_trajectories[:, -1] >= target_nw) * 100
 
-    col_res1, col_res2, col_res3 = st.columns(3)
+    col_res1, col_res2, col_res3, col_res4 = st.columns(4)
     col_res1.metric("Probability of Reaching Goal", f"{prob_success:.1f}%")
     col_res2.metric(f"Median Outcome (Age {target_age})", f"${final_median:,.0f}")
     col_res3.metric("Downside Stress Floor (10th %ile)", f"${final_p10:,.0f}")
+    col_res4.metric("If You Only Invested in Cash", f"${final_cash:,.0f}")
 
     if prob_success >= 75:
         st.success(f"✅ High confidence path: {prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
@@ -392,6 +546,9 @@ if st.button("🚀 Execute Monte Carlo Simulation", type="primary"):
     st.caption("Notice the log-normal, right-tail skew: the median outcome is highly localized, but extreme bull markets stretch the upside.")
     
     final_net_worths = all_trajectories[:, -1]
+    if "Today's Value" in display_mode:
+        final_net_worths = final_net_worths / ((1 + inflation_rate) ** (num_steps - 1))
+        
     hist_counts, bin_edges = np.histogram(final_net_worths, bins=40)
     bin_mids = (bin_edges[:-1] + bin_edges[1:]) / 2
     bin_labels = [f"${x/1000000:.1f}M" for x in bin_mids]
