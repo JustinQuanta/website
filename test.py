@@ -39,10 +39,13 @@ st.sidebar.header("2. Current Savings & Investments")
 cash_balance = st.sidebar.number_input("Liquid Cash / Emergency Fund ($)", min_value=0, value=0, step=5000)
 invested_balance = st.sidebar.number_input("Invested Portfolio (Stocks/ETFs) ($)", min_value=0, value=0, step=5000)
 
-cpf_balance = 0
+cpf_oa, cpf_sa, cpf_ma = 0, 0, 0
 if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
-    cpf_balance = st.sidebar.number_input("Current CPF Balance ($)", min_value=0, value=0, step=5000)
-
+    st.sidebar.markdown("##### CPF Balances")
+    cpf_oa = st.sidebar.number_input("Ordinary Account (OA) ($)", min_value=0, value=30000, step=5000)
+    cpf_sa = st.sidebar.number_input("Special Account (SA) ($)", min_value=0, value=15000, step=5000)
+    cpf_ma = st.sidebar.number_input("Medisave Account (MA) ($)", min_value=0, value=15000, step=5000)
+    
 # ==========================================
 # 2. BUDGET INGESTION & CASHFLOW
 # ==========================================
@@ -96,9 +99,6 @@ with tab_manual:
         custom_spending_total = sum(item["Amount"] for item in st.session_state.custom_spending)
 
     baseline_monthly_expenses = rent_mortgage + food_bev + utilities_bills + transport_travel + entertainment + other_exp + custom_spending_total
-    
-    st.markdown("##### Monthly Savings & Investing Plan")
-    monthly_investment = st.number_input("Amount to Invest in Stocks Monthly ($)", min_value=0, value=1000, step=100, help="This is the portion of your leftover cash you want to put into the market. Anything else will go straight to your bank/cash savings.")
 
 with tab_upload:
     st.info("Template columns required: `Month_Year`, `Category`, `Amount`, `Cashflow_Type` (Inflow / Outflow)")
@@ -108,17 +108,15 @@ with tab_upload:
             df_budget = pd.read_excel(uploaded_file)
             req_cols = {"Month_Year", "Category", "Amount", "Cashflow_Type"}
             if req_cols.issubset(df_budget.columns):
-                inflows = df_budget[df_budget['Cashflow_Type'].str.strip().str.lower() == 'inflow']['Amount'].sum()
                 outflows = df_budget[df_budget['Cashflow_Type'].str.strip().str.lower() == 'outflow']['Amount'].sum()
                 st.success(f"File verified! Detected monthly outflows: ${outflows:,.2f}")
                 baseline_monthly_expenses = outflows
-                monthly_investment = st.number_input("Amount to Invest in Stocks Monthly ($)", min_value=0, value=1000, step=100)
             else:
                 st.error(f"Missing required columns. Schema must contain: {req_cols}")
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# --- UPGRADE: Dynamic Take-Home Pay & Budget Validation ---
+# --- Dynamic Take-Home Pay ---
 if residency == "Singaporean/PR (CPF)":
     ow_subject_to_cpf = min(current_salary, 8000)
     employee_cpf_deduction = ow_subject_to_cpf * 0.20
@@ -126,21 +124,45 @@ if residency == "Singaporean/PR (CPF)":
 else:
     take_home_pay = current_salary
 
-total_outflow = baseline_monthly_expenses + monthly_investment
-surplus_cash = take_home_pay - total_outflow
+# --- MOVED OUTSIDE TABS: Investment Strategy UI ---
+st.markdown("##### 📈 Monthly Savings & Investing Plan")
+inv_strategy = st.radio(
+    "How do you want to allocate your surplus cash?",
+    ["Fixed Amount ($)", "Percentage of Surplus Cash (%)", "Aggressive Sweep (Invest 100% of leftover cash)"],
+    help="This scales your investments based on the surplus cash generated after baseline expenses."
+)
+
+monthly_investment = 0
+target_pct = 0.0
+projected_monthly_inv_ui = 0 # Used strictly for the UI metric display
+
+current_monthly_surplus = take_home_pay - baseline_monthly_expenses
+
+if inv_strategy == "Fixed Amount ($)":
+    monthly_investment = st.number_input("Amount to Invest in Stocks Monthly ($)", min_value=0, value=1000, step=100)
+    projected_monthly_inv_ui = monthly_investment
+elif inv_strategy == "Percentage of Surplus Cash (%)":
+    target_pct = st.slider("Percentage of Surplus Cash to Invest (%)", min_value=0, max_value=100, value=50, step=1) / 100
+    projected_monthly_inv_ui = max(0, current_monthly_surplus * target_pct)
+else:
+    # Aggressive Sweep: Everything leftover goes to market
+    projected_monthly_inv_ui = max(0, current_monthly_surplus) 
+
+total_outflow_ui = baseline_monthly_expenses + projected_monthly_inv_ui
+surplus_cash_ui = take_home_pay - total_outflow_ui
 
 st.write("---")
 col_met1, col_met2, col_met3 = st.columns(3)
 col_met1.metric("Take-Home Pay (After CPF)", f"${take_home_pay:,.2f}")
 col_met2.metric("Total Baseline Expenses", f"${baseline_monthly_expenses:,.2f}")
-col_met3.metric("Target Monthly Invest", f"${monthly_investment:,.2f}")
+col_met3.metric("Projected Monthly Invest", f"${projected_monthly_inv_ui:,.2f}")
 
 valid_budget = True
-if surplus_cash < 0:
-    st.error(f"🚨 **Budget Deficit Detected!** Your expenses and investments (${total_outflow:,.2f}) exceed your take-home pay by **\${abs(surplus_cash):,.2f}** a month. Please reduce your expenses or investment amount. The simulation cannot run with a negative cash flow.")
+if current_monthly_surplus < 0:
+    st.error(f"🚨 **Budget Deficit Detected!** Your baseline expenses exceed your take-home pay. The simulation cannot run with a negative baseline cash flow.")
     valid_budget = False
-elif surplus_cash > 0:
-    st.info(f"💡 **Uninvested Cash:** You have **${surplus_cash:,.2f}** left over every month. This money will automatically be swept into your liquid Bank/Emergency fund (growing at your safe cash yield rate) instead of the stock market.")
+elif surplus_cash_ui > 0 and inv_strategy != "Aggressive Sweep (Invest all leftover cash)":
+    st.info(f"💡 **Uninvested Cash:** You currently have an estimated **${surplus_cash_ui:,.2f}** left over every month. This money will automatically be swept into your liquid Bank/Emergency fund (growing at your safe cash yield rate).")
 
 # ==========================================
 # 3. MILESTONES & STRESS-TEST EVENTS
@@ -169,17 +191,14 @@ with st.expander("➕ Add an Event (Optional: House, Job Loss, Crash)", expanded
             tenure = st.number_input("Loan Tenure (Years)", min_value=1, max_value=35, value=25)
         with col_p3:
             st.info("💡 Monthly mortgage will be auto-calculated.")
-            auto_replace_rent = st.checkbox("Stop paying baseline rent after purchase?", value=True, help="Automatically subtracts your baseline Rent from your expenses once this mortgage starts.")
+            auto_replace_rent = st.checkbox("Stop paying baseline rent after purchase?", value=True)
+            use_cpf_prop = st.checkbox("Pay Downpayment & Mortgage with CPF OA?", value=True)
             st.write("")
             if st.button("Add Property Event"):
                 st.session_state.events.append({
-                    "Year": ev_year,
-                    "Type": ev_type,
-                    "PropVal": prop_val,
-                    "DP_Pct": dp_pct,
-                    "Rate": mortgage_rate,
-                    "Tenure": tenure,
-                    "AutoReplaceRent": auto_replace_rent
+                    "Year": ev_year, "Type": ev_type, "PropVal": prop_val, 
+                    "DP_Pct": dp_pct, "Rate": mortgage_rate, "Tenure": tenure, 
+                    "AutoReplaceRent": auto_replace_rent, "UseCPF": use_cpf_prop
                 })
                 st.rerun()
     else:
@@ -253,105 +272,212 @@ with col_r4:
     recovery_multiplier = st.slider("Market Bounce-Back (Multiplier after a crash)", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
 
 with st.expander("⚙️ Advanced Engine Settings (Tune Iterations)"):
-    sim_iterations = st.number_input("Monte Carlo Iterations", min_value=10000, max_value=500000, value=100000, step=10000)
+    sim_iterations = st.number_input("Monte Carlo Iterations", min_value=10000, max_value=500000, value=50000, step=10000)
     st.caption("Note: Running 100,000+ paths provides extreme statistical accuracy but may take a few seconds to process.")
 
 st.subheader("How do you want to view your results?")
 display_mode = st.radio("Display Projection In:", ["Future Value (Without factoring in inflation)", "Today's Value (Adjusted for inflation)"], horizontal=True)
 
-# Disable the execute button if the budget constraint fails
+# Helper for CPF Rates
+def get_cpf_allocation(age):
+    if age <= 35: return 0.23, 0.06, 0.08, 0.20
+    elif age <= 45: return 0.21, 0.07, 0.09, 0.20
+    elif age <= 50: return 0.19, 0.08, 0.10, 0.20
+    elif age <= 55: return 0.15, 0.115, 0.105, 0.20
+    else: return 0.12, 0.09, 0.105, 0.15 # Simplified >= 55
+
 if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budget):
     
-    with st.spinner(f"Computing {sim_iterations:,} alternate timelines..."):
-        
+    with st.spinner(f"Computing timelines with multi-tranche CPF sweeps..."):
         horizon_years = target_age - current_age
         years_array = np.arange(2026, 2026 + horizon_years + 1)
         ages_array = np.arange(current_age, target_age + 1)
         num_steps = len(years_array)
     
-    capex_dict = defaultdict(float)
-    recession_dict = {}
-    jobloss_dict = defaultdict(int)
+    capex_dict, recession_dict, jobloss_dict = defaultdict(float), {}, defaultdict(int)
     property_events = defaultdict(list)
     
-    # Map Events
     for e in st.session_state.events:
-        if e["Type"] == "Large One-Off Purchase (Wedding, Car, etc.)":
-            capex_dict[e["Year"]] += e["Magnitude"]
-        elif e["Type"] == "Market Crash (Stock Market Drop)":
-            recession_dict[e["Year"]] = e["Magnitude"] / 100
-        elif e["Type"] == "Job Loss / Career Break":
-            jobloss_dict[e["Year"]] += e["Magnitude"]
-        elif e["Type"] == "Property Purchase":
-            property_events[e["Year"]].append(e)
+        if e["Type"] == "Large One-Off Purchase (Wedding, Car, etc.)": capex_dict[e["Year"]] += e["Magnitude"]
+        elif e["Type"] == "Market Crash (Stock Market Drop)": recession_dict[e["Year"]] = e["Magnitude"] / 100
+        elif e["Type"] == "Job Loss / Career Break": jobloss_dict[e["Year"]] += e["Magnitude"]
+        elif e["Type"] == "Property Purchase": property_events[e["Year"]].append(e)
 
-    # --- THE MONTE CARLO ENGINE (INVESTMENT FOCUSED) ---
     all_trajectories = np.zeros((sim_iterations, num_steps))
-    initial_total_nw = cash_balance + invested_balance + (cpf_balance if include_cpf_in_nw else 0)
+    cpf_only_trajectories = np.zeros((sim_iterations, num_steps))
+    
+    all_cash_paths = np.zeros((sim_iterations, num_steps))
+    all_invest_paths = np.zeros((sim_iterations, num_steps))
+    all_cpf_paths = np.zeros((sim_iterations, num_steps))
+    
+    initial_total_nw = cash_balance + invested_balance + (cpf_oa + cpf_sa + cpf_ma if include_cpf_in_nw else 0)
     all_trajectories[:, 0] = initial_total_nw
     
+    salary_growth_array = np.zeros(num_steps)
+    salary_growth_array[0] = salary_growth
+    peak_age = 45
+    decay_rate = 0.005 # Wage growth drops by 0.5% per year after peak
+    
+    for t in range(1, num_steps):
+        if ages_array[t] > peak_age:
+            # Decay linearly until it hits the inflation floor
+            salary_growth_array[t] = max(inflation_rate, salary_growth_array[t-1] - decay_rate)
+        else:
+            salary_growth_array[t] = salary_growth_array[t-1]
+            
     for sim in range(sim_iterations):
-        curr_cash = cash_balance
-        curr_invest = invested_balance
-        curr_cpf = cpf_balance
-        curr_sal = current_salary
-        curr_exp = baseline_monthly_expenses
-
-        recovering_from_crash = False
-        active_mortgage = 0 
+        curr_cash, curr_invest = cash_balance, invested_balance
+        curr_oa, curr_sa, curr_ma, curr_ra = cpf_oa, cpf_sa, cpf_ma, 0
+        curr_sal, curr_exp = current_salary, baseline_monthly_expenses
+        recovering_from_crash, ra_created = False, False
+        active_mortgage, active_mortgage_cpf = 0, 0 
 
         for t in range(1, num_steps):
-            sim_year = years_array[t]
-            
-            curr_sal *= (1 + salary_growth)
+            sim_year, sim_age = years_array[t], ages_array[t]
+            curr_sal *= (1 + salary_growth_array[t])
             curr_exp *= (1 + inflation_rate)
             
+            # --- FIX: Deduct Capex Early (Before Market Volatility) ---
+            if sim_year in capex_dict:
+                capex = capex_dict[sim_year] * ((1 + inflation_rate) ** (sim_year - 2026))
+                if curr_cash >= capex: 
+                    curr_cash -= capex
+                else: 
+                    curr_invest = max(0, curr_invest - (capex - curr_cash))
+                    curr_cash = 0
+            
+            # --- FIX: Strict Property Capital Waterfall ---
             if sim_year in property_events:
                 for p_event in property_events[sim_year]:
-                    years_from_start = sim_year - 2026
-                    inflated_prop_val = p_event["PropVal"] * ((1 + inflation_rate) ** years_from_start)
-                    dp_amount = inflated_prop_val * (p_event["DP_Pct"] / 100)
-                    loan_amount = inflated_prop_val - dp_amount
+                    inflated_prop = p_event["PropVal"] * ((1 + inflation_rate) ** (sim_year - 2026))
+                    dp_amount = inflated_prop * (p_event["DP_Pct"] / 100)
+                    loan_amount = inflated_prop - dp_amount
                     
-                    if curr_cash >= dp_amount:
-                        curr_cash -= dp_amount
+                    r, n = (p_event["Rate"] / 100) / 12, p_event["Tenure"] * 12
+                    monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1) if r>0 else loan_amount/n
+                    
+                    property_failed = False
+                    if p_event.get("UseCPF", False):
+                        if curr_oa >= dp_amount:
+                            temp_oa = dp_amount; temp_cash = 0; temp_inv = 0
+                        else:
+                            temp_oa = curr_oa
+                            shortfall = dp_amount - curr_oa
+                            if curr_cash >= shortfall:
+                                temp_cash = shortfall; temp_inv = 0
+                            else:
+                                temp_cash = curr_cash; temp_inv = shortfall - curr_cash
+                                
+                        if temp_inv > curr_invest:
+                            property_failed = True # Cannot afford
+                        else:
+                            curr_oa -= temp_oa; curr_cash -= temp_cash; curr_invest -= temp_inv
+                            active_mortgage_cpf += monthly_mortgage
                     else:
-                        deficit = dp_amount - curr_cash
-                        curr_cash = 0
-                        curr_invest = max(0, curr_invest - deficit)
+                        if curr_cash >= dp_amount:
+                            temp_cash = dp_amount; temp_inv = 0
+                        else:
+                            temp_cash = curr_cash; temp_inv = dp_amount - curr_cash
+                            
+                        if temp_inv > curr_invest:
+                            property_failed = True # Cannot afford
+                        else:
+                            curr_cash -= temp_cash; curr_invest -= temp_inv
+                            active_mortgage += monthly_mortgage
                     
-                    r = (p_event["Rate"] / 100) / 12
-                    n = p_event["Tenure"] * 12
-                    if r > 0 and n > 0:
-                        monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1)
-                    else:
-                        monthly_mortgage = loan_amount / n if n > 0 else 0
-                        
-                    active_mortgage += monthly_mortgage
-                    
-                    if p_event.get("AutoReplaceRent", False):
-                        inflated_rent = rent_mortgage * ((1 + inflation_rate) ** years_from_start)
-                        curr_exp = max(0, curr_exp - inflated_rent)
+                    if not property_failed and p_event.get("AutoReplaceRent", False):
+                        curr_exp = max(0, curr_exp - (rent_mortgage * ((1 + inflation_rate) ** (sim_year - 2026))))
 
             months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
                 
             if residency == "Singaporean/PR (CPF)":
-                ow_subject_to_cpf = min(curr_sal, 8000)
-                employee_cpf_deduction = ow_subject_to_cpf * 0.20
-                total_annual_cpf_contrib = (ow_subject_to_cpf * 0.37) * months_worked
-                curr_cpf = (curr_cpf * 1.03) + total_annual_cpf_contrib 
-                annual_takehome = (curr_sal - employee_cpf_deduction) * months_worked
+                ow_capped = min(curr_sal, 8000)
+                alloc_oa, alloc_sa, alloc_ma, emp_deduct = get_cpf_allocation(sim_age)
+                
+                curr_oa += (ow_capped * alloc_oa) * months_worked
+                sa_contrib = (ow_capped * alloc_sa) * months_worked
+                ma_contrib = (ow_capped * alloc_ma) * months_worked
+                annual_takehome = (curr_sal - (ow_capped * emp_deduct)) * months_worked
+                
+                base_bhs_2026 = 71500
+                years_to_lock = min(sim_year, 2026 + max(0, 65 - current_age)) - 2026
+                current_bhs = base_bhs_2026 * ((1 + inflation_rate) ** years_to_lock)
+                
+                if curr_ma + ma_contrib > current_bhs:
+                    overflow = (curr_ma + ma_contrib) - current_bhs
+                    curr_ma = current_bhs  
+                    if sim_age < 55: curr_sa += sa_contrib + overflow
+                    else: curr_sa += sa_contrib; curr_ra += overflow
+                else:
+                    curr_ma += ma_contrib; curr_sa += sa_contrib
+                
+                annual_cpf_mort = active_mortgage_cpf * 12
+                if curr_oa >= annual_cpf_mort: curr_oa -= annual_cpf_mort
+                else:
+                    spillover = annual_cpf_mort - curr_oa
+                    curr_oa = 0; curr_cash -= spillover
+                    
+                curr_oa *= 1.025; curr_sa *= 1.04; curr_ma *= 1.04; curr_ra *= 1.04
+                
+                combined_bal = curr_oa + curr_sa + curr_ma + curr_ra
+                bonus_base = min(combined_bal, 60000)
+                smr_base = min(curr_sa + curr_ma + curr_ra, bonus_base)
+                oa_base = min(curr_oa, 20000, bonus_base - smr_base)
+                
+                curr_oa += oa_base * 0.01
+                if smr_base > 0:
+                    curr_sa += (curr_sa / (curr_sa + curr_ma + curr_ra)) * smr_base * 0.01
+                    curr_ma += (curr_ma / (curr_sa + curr_ma + curr_ra)) * smr_base * 0.01
+                    curr_ra += (curr_ra / (curr_sa + curr_ma + curr_ra)) * smr_base * 0.01
+                
+                if sim_age >= 55 and not ra_created:
+                    frs_limit = 220000 * ((1 + inflation_rate) ** t)
+                    sa_sweep = min(curr_sa, frs_limit)
+                    curr_sa -= sa_sweep; curr_ra += sa_sweep
+                    if curr_ra < frs_limit:
+                        oa_sweep = min(curr_oa, frs_limit - curr_ra)
+                        curr_oa -= oa_sweep; curr_ra += oa_sweep
+                    ra_created = True
             else:
                 annual_takehome = curr_sal * months_worked
-                curr_cpf = 0
             
             annual_living_costs = (curr_exp + active_mortgage) * 12
-            annual_surplus = max(0, annual_takehome - annual_living_costs)
+            net_cashflow = annual_takehome - annual_living_costs
             
-            planned_investment = monthly_investment * 12
-            actual_investment = min(planned_investment, annual_surplus)
-            actual_cash_savings = annual_surplus - actual_investment
+            # 1. Resolve existing debt (e.g., CPF mortgage spillovers) using this year's income
+            if curr_cash < 0:
+                net_cashflow += curr_cash 
+                curr_cash = 0
+
+            # 2. Capital Waterfall for Deficits
+            if net_cashflow < 0:
+                shortfall = abs(net_cashflow)
+                if curr_cash >= shortfall:
+                    curr_cash -= shortfall
+                else:
+                    remaining_debt = shortfall - curr_cash
+                    curr_cash = 0
+                    curr_invest = max(0, curr_invest - remaining_debt) # Liquidate assets
+                annual_surplus = 0
+            else:
+                annual_surplus = net_cashflow
+                
+            # 3. Apply safe yield to base cash
+            curr_cash *= (1 + cash_yield)
             
+            # 4. Allocate Surplus
+            if inv_strategy == "Fixed Amount ($)":
+                actual_inv = min(monthly_investment * 12, annual_surplus)
+                actual_cash = annual_surplus - actual_inv
+            elif inv_strategy == "Percentage of Surplus Cash (%)":
+                actual_inv = annual_surplus * target_pct
+                actual_cash = annual_surplus - actual_inv
+            else:
+                # Aggressive Sweep
+                actual_inv = annual_surplus
+                actual_cash = 0     
+            
+            # Market returns on existing portfolio
             if sim_year in recession_dict:
                 shock = recession_dict[sim_year]
                 curr_invest = max(0, curr_invest * (1 + shock))
@@ -367,195 +493,248 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
                     if recovering_from_crash:
                         current_mu = expected_market_return * recovery_multiplier
                         recovering_from_crash = False  
-                        
                     annual_return = np.exp((current_mu - 0.5 * market_volatility**2) + market_volatility * z) - 1
                     curr_invest = max(0, curr_invest * (1 + annual_return))
             
-            curr_cash = (curr_cash * (1 + cash_yield)) + actual_cash_savings 
-            curr_invest += actual_investment
+            # Add this year's surplus to the balances
+            curr_cash += actual_cash 
+            curr_invest += actual_inv
             
-            if sim_year in capex_dict:
-                years_from_start = sim_year - 2026
-                inflated_capex = capex_dict[sim_year] * ((1 + inflation_rate) ** years_from_start)
-                
-                if curr_cash >= inflated_capex:
-                    curr_cash -= inflated_capex
-                else:
-                    deficit = inflated_capex - curr_cash
-                    curr_cash = 0
-                    curr_invest = max(0, curr_invest - deficit)
-            
-            step_nw = curr_cash + curr_invest + (curr_cpf if include_cpf_in_nw else 0)
-            all_trajectories[sim, t] = step_nw
+            total_cpf = curr_oa + curr_sa + curr_ma + curr_ra
+            all_cash_paths[sim, t] = curr_cash
+            all_invest_paths[sim, t] = curr_invest
+            all_cpf_paths[sim, t] = total_cpf if include_cpf_in_nw else 0
+            all_trajectories[sim, t] = curr_cash + curr_invest + (total_cpf if include_cpf_in_nw else 0)
 
-    # Calculate Percentiles
     p10 = np.percentile(all_trajectories, 10, axis=0)
     p50 = np.percentile(all_trajectories, 50, axis=0)
     p90 = np.percentile(all_trajectories, 90, axis=0)
 
-    # --- THE 100% CASH ENGINE (DETERMINISTIC BASELINE) ---
+    # --- 100% CASH ENGINE (DETERMINISTIC BASELINE) ---
     cash_only_trajectory = np.zeros(num_steps)
     cash_only_cash = cash_balance + invested_balance 
-    cash_only_cpf = cpf_balance
-    cash_only_sal = current_salary
-    cash_only_exp = baseline_monthly_expenses
-    cash_only_active_mortgage = 0
-    cash_only_trajectory[0] = cash_only_cash + (cash_only_cpf if include_cpf_in_nw else 0)
+    cash_oa, cash_sa, cash_ma, cash_ra = cpf_oa, cpf_sa, cpf_ma, 0
+    cash_only_sal, cash_only_exp = current_salary, baseline_monthly_expenses
+    cash_only_active_mortgage, cash_only_active_mortgage_cpf = 0, 0
+    ra_created_cash = False
+    
+    cash_only_trajectory[0] = cash_only_cash
 
     for t in range(1, num_steps):
-        sim_year = years_array[t]
-        
-        cash_only_sal *= (1 + salary_growth)
+        sim_year, sim_age = years_array[t], ages_array[t]
+        cash_only_sal *= (1 + salary_growth_array[t])
         cash_only_exp *= (1 + inflation_rate)
+        
+        if sim_year in capex_dict:
+            capex = capex_dict[sim_year] * ((1 + inflation_rate) ** (sim_year - 2026))
+            if cash_only_cash >= capex: cash_only_cash -= capex
+            else: cash_only_cash = 0
         
         if sim_year in property_events:
             for p_event in property_events[sim_year]:
-                years_from_start = sim_year - 2026
-                inflated_prop_val = p_event["PropVal"] * ((1 + inflation_rate) ** years_from_start)
-                dp_amount = inflated_prop_val * (p_event["DP_Pct"] / 100)
-                loan_amount = inflated_prop_val - dp_amount
+                inflated_prop = p_event["PropVal"] * ((1 + inflation_rate) ** (sim_year - 2026))
+                dp_amount = inflated_prop * (p_event["DP_Pct"] / 100)
+                loan_amount = inflated_prop - dp_amount
                 
-                if cash_only_cash >= dp_amount:
-                    cash_only_cash -= dp_amount
+                r, n = (p_event["Rate"] / 100) / 12, p_event["Tenure"] * 12
+                monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1) if r>0 else loan_amount/n
+                
+                property_failed_cash = False
+                if p_event.get("UseCPF", False):
+                    if cash_oa + cash_only_cash >= dp_amount:
+                        if cash_oa >= dp_amount: cash_oa -= dp_amount
+                        else: 
+                            cash_only_cash -= (dp_amount - cash_oa)
+                            cash_oa = 0
+                        cash_only_active_mortgage_cpf += monthly_mortgage
+                    else: property_failed_cash = True
                 else:
-                    cash_only_cash = 0
+                    if cash_only_cash >= dp_amount:
+                        cash_only_cash -= dp_amount
+                        cash_only_active_mortgage += monthly_mortgage
+                    else: property_failed_cash = True
                 
-                r = (p_event["Rate"] / 100) / 12
-                n = p_event["Tenure"] * 12
-                if r > 0 and n > 0:
-                    monthly_mortgage = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1)
-                else:
-                    monthly_mortgage = loan_amount / n if n > 0 else 0
-                    
-                cash_only_active_mortgage += monthly_mortgage
-                
-                if p_event.get("AutoReplaceRent", False):
-                    inflated_rent = rent_mortgage * ((1 + inflation_rate) ** years_from_start)
-                    cash_only_exp = max(0, cash_only_exp - inflated_rent)
+                if not property_failed_cash and p_event.get("AutoReplaceRent", False):
+                    cash_only_exp = max(0, cash_only_exp - (rent_mortgage * ((1 + inflation_rate) ** (sim_year - 2026))))
 
         months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
             
         if residency == "Singaporean/PR (CPF)":
-            ow_subject_to_cpf = min(cash_only_sal, 8000)
-            employee_cpf_deduction = ow_subject_to_cpf * 0.20
-            total_annual_cpf_contrib = (ow_subject_to_cpf * 0.37) * months_worked
-            cash_only_cpf = (cash_only_cpf * 1.03) + total_annual_cpf_contrib 
-            annual_takehome = (cash_only_sal - employee_cpf_deduction) * months_worked
+            ow_capped = min(cash_only_sal, 8000)
+            alloc_oa, alloc_sa, alloc_ma, emp_deduct = get_cpf_allocation(sim_age)
+            
+            cash_oa += (ow_capped * alloc_oa) * months_worked
+            sa_contrib = (ow_capped * alloc_sa) * months_worked
+            ma_contrib = (ow_capped * alloc_ma) * months_worked
+            annual_takehome = (cash_only_sal - (ow_capped * emp_deduct)) * months_worked
+            
+            base_bhs_2026 = 71500
+            years_to_lock = min(sim_year, 2026 + max(0, 65 - current_age)) - 2026
+            current_bhs = base_bhs_2026 * ((1 + inflation_rate) ** years_to_lock)
+            
+            if cash_ma + ma_contrib > current_bhs:
+                overflow = (cash_ma + ma_contrib) - current_bhs
+                cash_ma = current_bhs
+                if sim_age < 55: cash_sa += sa_contrib + overflow
+                else: cash_sa += sa_contrib; cash_ra += overflow
+            else:
+                cash_ma += ma_contrib; cash_sa += sa_contrib
+                
+            annual_cpf_mort = cash_only_active_mortgage_cpf * 12
+            if cash_oa >= annual_cpf_mort: cash_oa -= annual_cpf_mort
+            else: cash_only_cash -= (annual_cpf_mort - cash_oa); cash_oa = 0
+                
+            cash_oa *= 1.025; cash_sa *= 1.04; cash_ma *= 1.04; cash_ra *= 1.04
+            
+            combined_bal = cash_oa + cash_sa + cash_ma + cash_ra
+            bonus_base = min(combined_bal, 60000)
+            smr_base = min(cash_sa + cash_ma + cash_ra, bonus_base)
+            oa_base = min(cash_oa, 20000, bonus_base - smr_base)
+            
+            cash_oa += oa_base * 0.01
+            if smr_base > 0:
+                cash_sa += (cash_sa / (cash_sa + cash_ma + cash_ra)) * smr_base * 0.01
+                cash_ma += (cash_ma / (cash_sa + cash_ma + cash_ra)) * smr_base * 0.01
+                cash_ra += (cash_ra / (cash_sa + cash_ma + cash_ra)) * smr_base * 0.01
+            
+            if sim_age >= 55 and not ra_created_cash:
+                frs_limit = 220000 * ((1 + inflation_rate) ** t)
+                sa_sweep = min(cash_sa, frs_limit)
+                cash_sa -= sa_sweep; cash_ra += sa_sweep
+                if cash_ra < frs_limit:
+                    oa_sweep = min(cash_oa, frs_limit - cash_ra)
+                    cash_oa -= oa_sweep; cash_ra += oa_sweep
+                ra_created_cash = True
         else:
             annual_takehome = cash_only_sal * months_worked
-            cash_only_cpf = 0
         
         annual_living_costs = (cash_only_exp + cash_only_active_mortgage) * 12
-        annual_surplus = max(0, annual_takehome - annual_living_costs)
+        net_cashflow = annual_takehome - annual_living_costs
         
-        cash_only_cash = (cash_only_cash * (1 + cash_yield)) + annual_surplus 
-        
-        if sim_year in capex_dict:
-            years_from_start = sim_year - 2026
-            inflated_capex = capex_dict[sim_year] * ((1 + inflation_rate) ** years_from_start)
+        # 1. Resolve existing debt
+        if cash_only_cash < 0:
+            net_cashflow += cash_only_cash
+            cash_only_cash = 0
             
-            if cash_only_cash >= inflated_capex:
-                cash_only_cash -= inflated_capex
-            else:
-                cash_only_cash = 0
+        # 2. Deficit Waterfall & Yield Application
+        if net_cashflow < 0:
+            shortfall = abs(net_cashflow)
+            cash_only_cash -= shortfall 
+            cash_only_cash *= (1 + cash_yield) 
+        else:
+            cash_only_cash *= (1 + cash_yield)
+            cash_only_cash += net_cashflow
         
-        cash_only_trajectory[t] = cash_only_cash + (cash_only_cpf if include_cpf_in_nw else 0)
+        cash_cpf_total = cash_oa + cash_sa + cash_ma + cash_ra
+        cash_only_trajectory[t] = cash_only_cash
 
-    # --- APPLY INFLATION DISCOUNT IF "REAL DOLLARS" SELECTED ---
     if "Today's Value" in display_mode:
         discount_factors = (1 + inflation_rate) ** np.arange(num_steps)
-        p10 = p10 / discount_factors
-        p50 = p50 / discount_factors
-        p90 = p90 / discount_factors
-        cash_only_trajectory = cash_only_trajectory / discount_factors
-
+        p10 /= discount_factors
+        p50 /= discount_factors
+        p90 /= discount_factors
+        cash_only_trajectory /= discount_factors
+        
+        p50_cash = np.percentile(all_cash_paths, 50, axis=0) / discount_factors
+        p50_invest = np.percentile(all_invest_paths, 50, axis=0) / discount_factors
+        p50_cpf = np.percentile(all_cpf_paths, 50, axis=0) / discount_factors
+    else:
+        p50_cash = np.percentile(all_cash_paths, 50, axis=0)
+        p50_invest = np.percentile(all_invest_paths, 50, axis=0)
+        p50_cpf = np.percentile(all_cpf_paths, 50, axis=0)
+        
     df_results = pd.DataFrame({
-        "Age": ages_array,
-        "Worst-Case": p10,
-        "Median Trajectory": p50,
-        "Best-Case": p90,
-        "Target Net Worth": [target_nw] * num_steps,
-        "100% Cash": cash_only_trajectory
+        "Age": ages_array, "Worst-Case": p10, "Median Trajectory": p50,
+        "Best-Case": p90, "Target Net Worth": [target_nw] * num_steps, "100% Cash": cash_only_trajectory
     }).round(0)
 
     st.subheader("Simulated Wealth Trajectory")
     
-    # --- ALTAIR SHADED FAN CHART WITH LEGEND ---
-    df_lines = df_results[["Age", "Median Trajectory", "100% Cash", "Target Net Worth"]].melt("Age", var_name="Scenario", value_name="Net Worth")
-    
-    color_scale = alt.Scale(
-        domain=["Median Trajectory", "100% Cash", "Target Net Worth"],
-        range=["#3182bd", "#7f8c8d", "#e74c3c"] 
-    )
+    df_lines = df_results[["Age", "Median Trajectory", "Target Net Worth"]].melt("Age", var_name="Scenario", value_name="Net Worth")
+    color_scale = alt.Scale(domain=["Median Trajectory","Target Net Worth"], range=["#3182bd", "#e74c3c"])
     
     lines = alt.Chart(df_lines).mark_line().encode(
         x=alt.X("Age:Q", axis=alt.Axis(tickMinStep=1, format="d")),
         y=alt.Y("Net Worth:Q", axis=alt.Axis(format="$,.0f")),
         color=alt.Color("Scenario:N", scale=color_scale, legend=alt.Legend(title="Trajectory", orient="bottom")),
-        strokeDash=alt.condition(
-            alt.datum.Scenario == "Target Net Worth",
-            alt.value([5, 5]),
-            alt.value([0])
-        ),
-        size=alt.condition(
-            alt.datum.Scenario == "Median Trajectory",
-            alt.value(3),
-            alt.value(2)
-        ),
-        tooltip=[
-            alt.Tooltip("Age:Q", title="Age"),
-            alt.Tooltip("Scenario:N", title="Scenario"),
-            alt.Tooltip("Net Worth:Q", format="$,.0f", title="Net Worth")
-        ]
+        strokeDash=alt.condition(alt.datum.Scenario == "Target Net Worth", alt.value([5, 5]), alt.value([0])),
+        size=alt.condition(alt.datum.Scenario == "Median Trajectory", alt.value(3), alt.value(2)),
+        tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Scenario:N", title="Scenario"), alt.Tooltip("Net Worth:Q", format="$,.0f", title="Net Worth")]
     )
     
     area = alt.Chart(df_results).mark_area(opacity=0.2, color="#3182bd").encode(
-        x=alt.X("Age:Q"),
-        y=alt.Y("Worst-Case:Q", title="Net Worth ($)"),
-        y2="Best-Case:Q",
-        tooltip=[
-            alt.Tooltip("Age:Q", title="Age"),
-            alt.Tooltip("Best-Case:Q", format="$,.0f", title="Best-Case (90th %ile)"),
-            alt.Tooltip("Worst-Case:Q", format="$,.0f", title="Worst-Case (10th %ile)")
-        ]
+        x=alt.X("Age:Q"), y=alt.Y("Worst-Case:Q", title="Net Worth ($)"), y2="Best-Case:Q",
+        tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Best-Case:Q", format="$,.0f", title="Best-Case (90th %ile)"), alt.Tooltip("Worst-Case:Q", format="$,.0f", title="Worst-Case (10th %ile)")]
     )
     
     chart = (area + lines).interactive()
     st.altair_chart(chart, width='stretch')
+    
+    st.subheader("Median Wealth Composition (Liquidity Breakdown)")
+    st.caption("This chart breaks down your median trajectory so you can identify if your wealth is tied up in illiquid assets.")
 
+    df_comp = pd.DataFrame({
+        "Age": ages_array,
+        "Uninvested Cash": p50_cash,
+        "Invested Portfolio": p50_invest,
+        "Locked CPF": p50_cpf
+    }).round(0)
+
+    df_comp_melted = df_comp.melt("Age", var_name="Asset Class", value_name="Value")
+
+    comp_chart = alt.Chart(df_comp_melted).mark_area().encode(
+        x=alt.X("Age:Q", axis=alt.Axis(tickMinStep=1, format="d")),
+        y=alt.Y("Value:Q", axis=alt.Axis(format="$,.0f"), title="Median Net Worth ($)"),
+        color=alt.Color("Asset Class:N",
+                        scale=alt.Scale(
+                            domain=["Locked CPF", "Invested Portfolio", "Uninvested Cash"], 
+                            range=["#bdc3c7", "#3182bd", "#2ecc71"] 
+                        ),
+                        legend=alt.Legend(title="Asset Type", orient="bottom")),
+        tooltip=[
+            alt.Tooltip("Age:Q", title="Age"),
+            alt.Tooltip("Asset Class:N", title="Category"),
+            alt.Tooltip("Value:Q", format="$,.0f", title="Amount")
+        ]
+    ).interactive()
+
+    st.altair_chart(comp_chart, use_container_width=True)
+    
     final_median = p50[-1]
     final_p10 = p10[-1]
     final_cash = cash_only_trajectory[-1]
+    final_cpf = p50_cpf[-1]
     prob_success = np.mean(all_trajectories[:, -1] >= target_nw) * 100
 
-    col_res1, col_res2, col_res3, col_res4 = st.columns(4)
-    col_res1.metric("Probability of Reaching Goal", f"{prob_success:.1f}%")
-    col_res2.metric(f"Median Outcome (Age {target_age})", f"${final_median:,.0f}")
-    col_res3.metric("Downside Stress Floor (10th %ile)", f"${final_p10:,.0f}")
-    col_res4.metric("If You Only Invested in Cash", f"${final_cash:,.0f}")
-
-    if prob_success >= 75:
-        st.success(f"✅ High confidence path: {prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
-    elif prob_success >= 50:
-        st.warning(f"⚠️ Moderate confidence ({prob_success:.1f}%). Consider increasing monthly savings or reducing milestone drag.")
+    # Dynamically display 5 columns if CPF is included, or 4 if it is excluded
+    if include_cpf_in_nw:
+        col_res1, col_res2, col_res3, col_res4, col_res5 = st.columns(5)
+        col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
+        col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
+        col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
+        col_res4.metric("Hypothetical: 100% Bank (No Stocks/CPF)", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
+        col_res5.metric("Amount Locked in CPF", f"${final_cpf:,.0f}")
     else:
+        col_res1, col_res2, col_res3, col_res4 = st.columns(4)
+        col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
+        col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
+        col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
+        col_res4.metric("Hypothetical: 100% Bank (No Stocks/CPF)", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
+
+    if prob_success >= 75: 
+        st.success(f"✅ High confidence path: {prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
+    elif prob_success >= 50: 
+        st.warning(f"⚠️ Moderate confidence ({prob_success:.1f}%). Consider increasing monthly savings or reducing milestone drag.")
+    else: 
         st.error(f"🚨 High shortfall risk. Adjust timeline, lower milestone outflows, or modify asset return targets.")
 
     st.divider()
     st.subheader(f"📊 Terminal Wealth Distribution at Age {target_age}")
     st.caption("Notice the log-normal, right-tail skew: the median outcome is highly localized, but extreme bull markets stretch the upside.")
     
-    final_net_worths = all_trajectories[:, -1]
-    if "Today's Value" in display_mode:
-        final_net_worths = final_net_worths / ((1 + inflation_rate) ** (num_steps - 1))
-        
-    hist_counts, bin_edges = np.histogram(final_net_worths, bins=40)
+    final_nw_raw = all_trajectories[:, -1] / (((1 + inflation_rate) ** (num_steps - 1)) if "Today's Value" in display_mode else 1)
+    hist_counts, bin_edges = np.histogram(final_nw_raw, bins=40)
     bin_mids = (bin_edges[:-1] + bin_edges[1:]) / 2
-    bin_labels = [f"${x/1000000:.1f}M" for x in bin_mids]
     
-    df_hist = pd.DataFrame({
-        "Frequency": hist_counts,
-        "Net Worth Bracket": bin_labels
-    }).set_index("Net Worth Bracket")
-    
+    df_hist = pd.DataFrame({"Frequency": hist_counts, "Net Worth Bracket": [f"${x/1000000:.1f}M" for x in bin_mids]}).set_index("Net Worth Bracket")
     st.bar_chart(df_hist)
