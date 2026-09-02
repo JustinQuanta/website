@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import altair as alt
 from collections import defaultdict
+import google.generativeai as genai
+import io
 
 st.set_page_config(page_title="Wealth & Retirement Forecaster", layout="wide")
 
@@ -14,6 +16,8 @@ if "events" not in st.session_state:
     st.session_state.events = []
 if "custom_spending" not in st.session_state:
     st.session_state.custom_spending = []
+if "simulation_run" not in st.session_state:
+    st.session_state.simulation_run = False
 
 # ==========================================
 # 1. SIDEBAR: Profile & Asset Starting Point
@@ -23,7 +27,7 @@ col_sb1, col_sb2 = st.sidebar.columns(2)
 with col_sb1:
     current_age = st.number_input("Current Age", min_value=18, max_value=80, value=30)
     current_salary = st.number_input("Monthly Gross Salary ($)", min_value=0, value=6000, step=250)
-    salary_growth = st.number_input("Salary Growth (% p.a.)", min_value=0.0, max_value=20.0, value=3.5, step=0.5) / 100
+    salary_growth = st.number_input("Salary Growth (% p.a.)", min_value=0.0, max_value=20.0, value=3.0, step=0.5) / 100
 with col_sb2:
     target_age = st.number_input("Target Age", min_value=current_age + 1, max_value=100, value=45)
     target_nw = st.number_input("Net Worth Target ($)", min_value=0, value=1_000_000, step=50_000)
@@ -42,9 +46,9 @@ invested_balance = st.sidebar.number_input("Invested Portfolio (Stocks/ETFs) ($)
 cpf_oa, cpf_sa, cpf_ma = 0, 0, 0
 if residency == "Singaporean/PR (CPF)" and include_cpf_in_nw:
     st.sidebar.markdown("##### CPF Balances")
-    cpf_oa = st.sidebar.number_input("Ordinary Account (OA) ($)", min_value=0, value=30000, step=5000)
-    cpf_sa = st.sidebar.number_input("Special Account (SA) ($)", min_value=0, value=15000, step=5000)
-    cpf_ma = st.sidebar.number_input("Medisave Account (MA) ($)", min_value=0, value=15000, step=5000)
+    cpf_oa = st.sidebar.number_input("Ordinary Account (OA) ($)", min_value=0, value=0, step=5000)
+    cpf_sa = st.sidebar.number_input("Special Account (SA) ($)", min_value=0, value=0, step=5000)
+    cpf_ma = st.sidebar.number_input("Medisave Account (MA) ($)", min_value=0, value=0, step=5000)
     
 # ==========================================
 # 2. BUDGET INGESTION & CASHFLOW
@@ -192,7 +196,8 @@ with st.expander("➕ Add an Event (Optional: House, Job Loss, Crash)", expanded
         with col_p3:
             st.info("💡 Monthly mortgage will be auto-calculated.")
             auto_replace_rent = st.checkbox("Stop paying baseline rent after purchase?", value=True)
-            use_cpf_prop = st.checkbox("Pay Downpayment & Mortgage with CPF OA?", value=True)
+            mortgage_funding = st.radio("Fund Downpayment & Mortgage with:", ["CPF OA (Spills to Cash if short)", "100% Cash"])
+            use_cpf_prop = True if "CPF OA" in mortgage_funding else False
             st.write("")
             if st.button("Add Property Event"):
                 st.session_state.events.append({
@@ -520,6 +525,19 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     
     cash_only_trajectory[0] = cash_only_cash
 
+    # For reporting purposes
+    report_salary = np.zeros(num_steps)
+    report_rent = np.zeros(num_steps)
+    report_food = np.zeros(num_steps)
+    report_util = np.zeros(num_steps)
+    report_trans = np.zeros(num_steps)
+    report_ent = np.zeros(num_steps)
+    report_ins = np.zeros(num_steps)
+    report_custom = np.zeros(num_steps)
+    report_expenses = np.zeros(num_steps)
+    report_mortgage = np.zeros(num_steps)
+    report_capex = np.zeros(num_steps)
+    
     for t in range(1, num_steps):
         sim_year, sim_age = years_array[t], ages_array[t]
         cash_only_sal *= (1 + salary_growth_array[t])
@@ -627,6 +645,29 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         
         cash_cpf_total = cash_oa + cash_sa + cash_ma + cash_ra
         cash_only_trajectory[t] = cash_only_cash
+        
+        # For reporting purpose
+        inf_mult = (1 + inflation_rate) ** t
+        is_rent_replaced = any(p.get("AutoReplaceRent", False) for y, p_list in property_events.items() if y <= sim_year for p in p_list)
+        
+        base_rent = 0 if is_rent_replaced else (rent_mortgage * 12 * inf_mult)
+        total_mortgage = (cash_only_active_mortgage + cash_only_active_mortgage_cpf) * 12
+        cash_mortgage = cash_only_active_mortgage * 12
+        
+        report_salary[t] = annual_takehome
+        report_rent[t] = base_rent + total_mortgage 
+        
+        report_food[t] = food_bev * 12 * inf_mult
+        report_util[t] = utilities_bills * 12 * inf_mult
+        report_trans[t] = transport_travel * 12 * inf_mult
+        report_ent[t] = entertainment * 12 * inf_mult
+        report_ins[t] = other_exp * 12 * inf_mult
+        report_custom[t] = custom_spending_total * 12 * inf_mult
+        
+        # Total Cash Living Expenses strictly tracks cash outlays (excludes the CPF mortgage portion)
+        report_expenses[t] = base_rent + cash_mortgage + report_food[t] + report_util[t] + report_trans[t] + report_ent[t] + report_ins[t] + report_custom[t]
+        
+        report_capex[t] = capex if sim_year in capex_dict else 0
 
     if "Today's Value" in display_mode:
         discount_factors = (1 + inflation_rate) ** np.arange(num_steps)
@@ -698,7 +739,7 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         ]
     ).interactive()
 
-    st.altair_chart(comp_chart, use_container_width=True)
+    st.altair_chart(comp_chart, width='stretch')
     
     final_median = p50[-1]
     final_p10 = p10[-1]
@@ -712,14 +753,14 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
         col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
         col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
-        col_res4.metric("Hypothetical: 100% Bank (No Stocks/CPF)", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
+        col_res4.metric("Hypothetical: 100% Bank", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
         col_res5.metric("Amount Locked in CPF", f"${final_cpf:,.0f}")
     else:
         col_res1, col_res2, col_res3, col_res4 = st.columns(4)
         col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
         col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
         col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
-        col_res4.metric("Hypothetical: 100% Bank (No Stocks/CPF)", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
+        col_res4.metric("Hypothetical: 100% Bank", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
 
     if prob_success >= 75: 
         st.success(f"✅ High confidence path: {prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
@@ -738,3 +779,117 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     
     df_hist = pd.DataFrame({"Frequency": hist_counts, "Net Worth Bracket": [f"${x/1000000:.1f}M" for x in bin_mids]}).set_index("Net Worth Bracket")
     st.bar_chart(df_hist)
+    
+    df_report = pd.DataFrame({
+        "Year": years_array,
+        "Age": ages_array,
+        "Take-Home Salary": report_salary,
+        "Housing (Rent/Mortgage)": report_rent,
+        "Food & Dining": report_food,
+        "Utilities & Telco": report_util,
+        "Transport": report_trans,
+        "Leisure": report_ent,
+        "Insurance": report_ins,
+        "Custom Spends": report_custom,
+        "Total Cash Living Expenses": report_expenses,
+        "Major Events (Capex)": report_capex,
+        "Median Invested Net Worth": p50,
+        "Total CPF Balance": p50_cpf,
+        "100% Cash Baseline": cash_only_trajectory
+    }).round(0)
+    
+    # --- SAVE TO SESSION STATE SO IT SURVIVES BUTTON CLICKS ---
+    st.session_state.df_report = df_report
+    st.session_state.prob_success = prob_success
+    st.session_state.initial_total_nw = initial_total_nw
+    st.session_state.final_median = final_median
+    st.session_state.final_cash = final_cash
+    st.session_state.final_cpf = final_cpf
+    st.session_state.simulation_run = True
+
+# ==========================================
+# 5. POST-SIMULATION: REPORTING & AI
+# ==========================================
+# This guardrail ensures the UI only loads AFTER a successful simulation
+if st.session_state.simulation_run:
+    st.divider()
+    
+    # Show the table in a clean, collapsible expander
+    with st.expander("🔍 View Itemized Year-by-Year Financial Ledger", expanded=False):
+        st.dataframe(st.session_state.df_report, width='stretch')
+    
+    # --- AI EXECUTIVE SUMMARY & EXCEL EXPORT ---
+    st.subheader("🤖 Generate Smart Excel Report")
+    st.caption("The AI will analyze your specific expenses and bundle a custom narrative directly into an Excel file alongside your ledger.")
+    
+    # Setup an expander for API Key input so you don't hardcode it
+    api_key = st.text_input("Enter Gemini API Key:", type="password")
+    
+    if st.button("Generate Excel Report") and api_key:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-flash-latest')
+        
+        # Structure the prompt with the exact simulation results AND specific expenses
+        prompt = f"""
+        You are an expert, empathetic financial advisor. Summarize the following Monte Carlo financial simulation for a {target_age - current_age}-year forecast.
+        
+        Data Points:
+        - Target Net Worth: ${target_nw:,.0f}
+        - Probability of Success: {st.session_state.prob_success:.1f}%
+        - Starting Net Worth: ${st.session_state.initial_total_nw:,.0f}
+        - Projected Median Net Worth at Age {target_age}: ${st.session_state.final_median:,.0f}
+        
+        Monthly Expense Breakdown:
+        - Rent/Mortgage: ${rent_mortgage}
+        - Food & Dining: ${food_bev}
+        - Utilities: ${utilities_bills}
+        - Transport: ${transport_travel}
+        - Leisure: ${entertainment}
+        - Insurance: ${other_exp}
+        - Custom/Other: ${custom_spending_total}
+        
+        Write a 3-paragraph executive summary. 
+        Paragraph 1: Assess their probability of success and overall trajectory.
+        Paragraph 2: Analyze their monthly expenses. Identify 1 or 2 specific categories from the list above where they could reasonably cut back to increase their investment allocation and accelerate compounding.
+        Paragraph 3: Give a concrete piece of advice comparing their invested trajectory versus the baseline of holding 100% cash.
+        Do not use generic disclaimers. Tone should be professional, candid, and highly actionable.
+        """
+        
+        with st.spinner("Analyzing expenses and building Excel report..."):
+            try:
+                # 1. Get the AI Response
+                response = model.generate_content(prompt)
+                ai_text = response.text
+                
+                # 2. Build the Excel File in Memory
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    # Write the DataFrame to Sheet 1
+                    st.session_state.df_report.to_excel(writer, sheet_name='Financial Ledger', index=False)
+                    
+                    # Write the AI Narrative to Sheet 2
+                    workbook = writer.book
+                    summary_sheet = workbook.add_worksheet('AI Executive Summary')
+                    
+                    format_wrap = workbook.add_format({'text_wrap': True, 'valign': 'top'})
+                    format_bold = workbook.add_format({'bold': True, 'font_size': 14})
+                    
+                    summary_sheet.set_column('A:A', 120) # Make the column wide enough to read like a document
+                    summary_sheet.write('A1', "AI Executive Summary", format_bold)
+                    summary_sheet.write('A3', ai_text, format_wrap)
+                    
+                # Save to session state
+                st.session_state.excel_data = output.getvalue()
+                
+            except Exception as e:
+                st.error(f"Failed to generate report: {e}")
+                
+    # If the Excel file exists in memory, show the download button
+    if "excel_data" in st.session_state:
+        st.success("✅ Report generated successfully!")
+        st.download_button(
+            label="📥 Download Complete Report (Excel)",
+            data=st.session_state.excel_data,
+            file_name="wealth_forecast_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
