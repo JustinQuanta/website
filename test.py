@@ -5,6 +5,9 @@ import altair as alt
 from collections import defaultdict
 import google.generativeai as genai
 import io
+import tempfile
+import matplotlib.pyplot as plt
+from fpdf import FPDF
 
 st.set_page_config(page_title="Wealth & Retirement Forecaster", layout="wide")
 
@@ -58,19 +61,26 @@ st.header("3. Estimated Monthly Budget Cost")
 tab_manual, tab_upload = st.tabs(["Manual Monthly Budget", "Upload Excel Template"])
 
 with tab_manual:
+    st.caption("Check the 'Fixed' box if the expense does NOT grow with inflation (e.g., a fixed mortgage or locked premiums).")
     col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
         rent_mortgage = st.number_input("Rent / Mortgage ($)", min_value=0, value=1200, step=50)
+        rent_fixed = st.checkbox("Fixed Cost", value=True, key="fix_rent")
         food_bev = st.number_input("Food & Dining ($)", min_value=0, value=650, step=50)
+        food_fixed = st.checkbox("Fixed Cost", value=False, key="fix_food")
     with col_b2:
         utilities_bills = st.number_input("Utilities & Telco ($)", min_value=0, value=180, step=20)
+        util_fixed = st.checkbox("Fixed Cost", value=False, key="fix_util")
         transport_travel = st.number_input("Transport & Travel ($)", min_value=0, value=350, step=50)
+        trans_fixed = st.checkbox("Fixed Cost", value=False, key="fix_trans")
     with col_b3:
         entertainment = st.number_input("Discretionary / Leisure ($)", min_value=0, value=250, step=50)
+        ent_fixed = st.checkbox("Fixed Cost", value=False, key="fix_ent")
         other_exp = st.number_input("Insurance ($)", min_value=0, value=300, step=50)
+        ins_fixed = st.checkbox("Fixed Cost", value=True, key="fix_ins")
     
     with st.expander("➕ Add Extra Monthly Expenses (Optional)", expanded=False):
-        col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
+        col_c1, col_c2, col_c3, col_c4 = st.columns([2, 2, 1, 1])
         with col_c1:
             new_cat_name = st.text_input("Category Name", value="Gym & Subscriptions")
         with col_c2:
@@ -78,10 +88,15 @@ with tab_manual:
         with col_c3:
             st.write("")
             st.write("")
+            new_cat_fixed = st.checkbox("Fixed", value=False, key="fix_new")
+        with col_c4:
+            st.write("")
+            st.write("")
             if st.button("Add Category"):
                 st.session_state.custom_spending.append({
                     "Name": new_cat_name,
-                    "Amount": new_cat_amt
+                    "Amount": new_cat_amt,
+                    "Fixed": new_cat_fixed
                 })
                 st.rerun()
 
@@ -90,7 +105,8 @@ with tab_manual:
         st.markdown("#### Your Custom Categories")
         for i, cat in enumerate(st.session_state.custom_spending):
             col_cs1, col_cs2 = st.columns([5, 1])
-            col_cs1.write(f"**{cat['Name']}** ➔ ${cat['Amount']:,.2f}")
+            fixed_label = "(Fixed)" if cat.get("Fixed", False) else "(Variable)"
+            col_cs1.write(f"**{cat['Name']}** {fixed_label} ➔ ${cat['Amount']:,.2f}")
             if col_cs2.button("❌ Remove", key=f"del_cat_{i}"):
                 st.session_state.custom_spending.pop(i)
                 st.rerun()
@@ -309,6 +325,35 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         elif e["Type"] == "Property Purchase": property_events[e["Year"]].append(e)
 
     all_trajectories = np.zeros((sim_iterations, num_steps))
+    # Pre-calculate baseline expenses per year to handle fixed vs variable cleanly
+    annual_exp_array = np.zeros(num_steps)
+    rent_replacement_array = np.zeros(num_steps)
+    
+    annual_exp_array[0] = baseline_monthly_expenses
+    rent_replacement_array[0] = rent_mortgage
+
+    for t in range(1, num_steps):
+        inf_mult = (1 + inflation_rate) ** t
+        
+        # If user uploaded Excel, default to inflating everything (fallback)
+        if uploaded_file and req_cols.issubset(df_budget.columns):
+            annual_exp_array[t] = baseline_monthly_expenses * inf_mult
+            rent_replacement_array[t] = rent_mortgage * inf_mult 
+        else:
+            current_rent = rent_mortgage if rent_fixed else rent_mortgage * inf_mult
+            current_food = food_bev if food_fixed else food_bev * inf_mult
+            current_util = utilities_bills if util_fixed else utilities_bills * inf_mult
+            current_trans = transport_travel if trans_fixed else transport_travel * inf_mult
+            current_ent = entertainment if ent_fixed else entertainment * inf_mult
+            current_ins = other_exp if ins_fixed else other_exp * inf_mult
+            
+            current_custom = 0
+            for cat in st.session_state.custom_spending:
+                current_custom += cat["Amount"] if cat.get("Fixed", False) else cat["Amount"] * inf_mult
+                
+            annual_exp_array[t] = current_rent + current_food + current_util + current_trans + current_ent + current_ins + current_custom
+            rent_replacement_array[t] = current_rent
+    
     cpf_only_trajectories = np.zeros((sim_iterations, num_steps))
     
     all_cash_paths = np.zeros((sim_iterations, num_steps))
@@ -333,14 +378,19 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     for sim in range(sim_iterations):
         curr_cash, curr_invest = cash_balance, invested_balance
         curr_oa, curr_sa, curr_ma, curr_ra = cpf_oa, cpf_sa, cpf_ma, 0
-        curr_sal, curr_exp = current_salary, baseline_monthly_expenses
+        curr_sal = current_salary
         recovering_from_crash, ra_created = False, False
         active_mortgage, active_mortgage_cpf = 0, 0 
+        is_rent_replaced = False # State tracker for property
 
         for t in range(1, num_steps):
             sim_year, sim_age = years_array[t], ages_array[t]
             curr_sal *= (1 + salary_growth_array[t])
-            curr_exp *= (1 + inflation_rate)
+            
+            # Use pre-calculated dynamic expenses
+            curr_exp = annual_exp_array[t]
+            if is_rent_replaced:
+                curr_exp = max(0, curr_exp - rent_replacement_array[t])
             
             # --- FIX: Deduct Capex Early (Before Market Volatility) ---
             if sim_year in capex_dict:
@@ -374,7 +424,7 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
                                 temp_cash = curr_cash; temp_inv = shortfall - curr_cash
                                 
                         if temp_inv > curr_invest:
-                            property_failed = True # Cannot afford
+                            property_failed = True 
                         else:
                             curr_oa -= temp_oa; curr_cash -= temp_cash; curr_invest -= temp_inv
                             active_mortgage_cpf += monthly_mortgage
@@ -385,13 +435,14 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
                             temp_cash = curr_cash; temp_inv = dp_amount - curr_cash
                             
                         if temp_inv > curr_invest:
-                            property_failed = True # Cannot afford
+                            property_failed = True 
                         else:
                             curr_cash -= temp_cash; curr_invest -= temp_inv
                             active_mortgage += monthly_mortgage
                     
                     if not property_failed and p_event.get("AutoReplaceRent", False):
-                        curr_exp = max(0, curr_exp - (rent_mortgage * ((1 + inflation_rate) ** (sim_year - 2026))))
+                        is_rent_replaced = True
+                        curr_exp = max(0, curr_exp - rent_replacement_array[t])
 
             months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
                 
@@ -519,9 +570,10 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     cash_only_trajectory = np.zeros(num_steps)
     cash_only_cash = cash_balance + invested_balance 
     cash_oa, cash_sa, cash_ma, cash_ra = cpf_oa, cpf_sa, cpf_ma, 0
-    cash_only_sal, cash_only_exp = current_salary, baseline_monthly_expenses
+    cash_only_sal = current_salary
     cash_only_active_mortgage, cash_only_active_mortgage_cpf = 0, 0
     ra_created_cash = False
+    is_rent_replaced_cash = False
     
     cash_only_trajectory[0] = cash_only_cash
 
@@ -541,7 +593,10 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     for t in range(1, num_steps):
         sim_year, sim_age = years_array[t], ages_array[t]
         cash_only_sal *= (1 + salary_growth_array[t])
-        cash_only_exp *= (1 + inflation_rate)
+        
+        cash_only_exp = annual_exp_array[t]
+        if is_rent_replaced_cash:
+            cash_only_exp = max(0, cash_only_exp - rent_replacement_array[t])
         
         if sim_year in capex_dict:
             capex = capex_dict[sim_year] * ((1 + inflation_rate) ** (sim_year - 2026))
@@ -573,7 +628,8 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
                     else: property_failed_cash = True
                 
                 if not property_failed_cash and p_event.get("AutoReplaceRent", False):
-                    cash_only_exp = max(0, cash_only_exp - (rent_mortgage * ((1 + inflation_rate) ** (sim_year - 2026))))
+                    is_rent_replaced_cash = True
+                    cash_only_exp = max(0, cash_only_exp - rent_replacement_array[t])
 
         months_worked = max(0, 12 - jobloss_dict.get(sim_year, 0))
             
@@ -648,25 +704,37 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         
         # For reporting purpose
         inf_mult = (1 + inflation_rate) ** t
-        is_rent_replaced = any(p.get("AutoReplaceRent", False) for y, p_list in property_events.items() if y <= sim_year for p in p_list)
         
-        base_rent = 0 if is_rent_replaced else (rent_mortgage * 12 * inf_mult)
+        report_salary[t] = annual_takehome
+        
+        if uploaded_file and req_cols.issubset(df_budget.columns):
+            # Fallback reporting for Excel uploads
+            report_food[t] = food_bev * 12 * inf_mult
+            report_util[t] = utilities_bills * 12 * inf_mult
+            report_trans[t] = transport_travel * 12 * inf_mult
+            report_ent[t] = entertainment * 12 * inf_mult
+            report_ins[t] = other_exp * 12 * inf_mult
+            report_custom[t] = custom_spending_total * 12 * inf_mult
+        else:
+            report_food[t] = (food_bev if food_fixed else food_bev * inf_mult) * 12
+            report_util[t] = (utilities_bills if util_fixed else utilities_bills * inf_mult) * 12
+            report_trans[t] = (transport_travel if trans_fixed else transport_travel * inf_mult) * 12
+            report_ent[t] = (entertainment if ent_fixed else entertainment * inf_mult) * 12
+            report_ins[t] = (other_exp if ins_fixed else other_exp * inf_mult) * 12
+            
+            custom_inf = 0
+            for cat in st.session_state.custom_spending:
+                custom_inf += cat["Amount"] if cat.get("Fixed", False) else cat["Amount"] * inf_mult
+            report_custom[t] = custom_inf * 12
+
+        base_rent = 0 if is_rent_replaced_cash else rent_replacement_array[t] * 12
         total_mortgage = (cash_only_active_mortgage + cash_only_active_mortgage_cpf) * 12
         cash_mortgage = cash_only_active_mortgage * 12
         
-        report_salary[t] = annual_takehome
         report_rent[t] = base_rent + total_mortgage 
-        
-        report_food[t] = food_bev * 12 * inf_mult
-        report_util[t] = utilities_bills * 12 * inf_mult
-        report_trans[t] = transport_travel * 12 * inf_mult
-        report_ent[t] = entertainment * 12 * inf_mult
-        report_ins[t] = other_exp * 12 * inf_mult
-        report_custom[t] = custom_spending_total * 12 * inf_mult
         
         # Total Cash Living Expenses strictly tracks cash outlays (excludes the CPF mortgage portion)
         report_expenses[t] = base_rent + cash_mortgage + report_food[t] + report_util[t] + report_trans[t] + report_ent[t] + report_ins[t] + report_custom[t]
-        
         report_capex[t] = capex if sim_year in capex_dict else 0
 
     if "Today's Value" in display_mode:
@@ -685,13 +753,54 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         p50_cpf = np.percentile(all_cpf_paths, 50, axis=0)
         
     df_results = pd.DataFrame({
-        "Age": ages_array, "Worst-Case": p10, "Median Trajectory": p50,
-        "Best-Case": p90, "Target Net Worth": [target_nw] * num_steps, "100% Cash": cash_only_trajectory
-    }).round(0)
+            "Age": ages_array, "Worst-Case": p10, "Median Trajectory": p50,
+            "Best-Case": p90, "Target Net Worth": [target_nw] * num_steps, "100% Cash": cash_only_trajectory
+        }).round(0)
+        
+    df_comp = pd.DataFrame({
+            "Age": ages_array, "Uninvested Cash": p50_cash, "Invested Portfolio": p50_invest, "Locked CPF": p50_cpf
+        }).round(0)
+        
+    df_report = pd.DataFrame({
+            "Year": years_array, "Age": ages_array, "Take-Home Salary": report_salary,
+            "Housing (Rent/Mortgage)": report_rent, "Food & Dining": report_food,
+            "Utilities & Telco": report_util, "Transport": report_trans,
+            "Leisure": report_ent, "Insurance": report_ins, "Custom Spends": report_custom,
+            "Total Cash Living Expenses": report_expenses, "Major Events (Capex)": report_capex,
+            "Median Invested Net Worth": p50, "Total CPF Balance": p50_cpf, "100% Cash Baseline": cash_only_trajectory
+        }).round(0)
 
-    st.subheader("Simulated Wealth Trajectory")
+    # --- SAVE TO SESSION STATE SO CHARTS SURVIVE BUTTON CLICKS ---
+    st.session_state.df_results = df_results
+    st.session_state.df_comp = df_comp
+    st.session_state.df_report = df_report
+    st.session_state.prob_success = np.mean(all_trajectories[:, -1] >= target_nw) * 100
+    st.session_state.initial_total_nw = initial_total_nw
+    st.session_state.final_median = p50[-1]
+    st.session_state.final_p10 = p10[-1]
+    st.session_state.final_cash = cash_only_trajectory[-1]
+    st.session_state.final_cpf = p50_cpf[-1]
+    st.session_state.final_nw_raw = all_trajectories[:, -1] / (((1 + inflation_rate) ** (num_steps - 1)) if "Today's Value" in display_mode else 1)
+    st.session_state.simulation_run = True
+        
+    # --- FIX: WIPE OLD REPORTS FROM MEMORY ---
+    # This deletes any old PDF or Excel files so the download button disappears 
+    # until the user explicitly clicks "Generate Report" for the new scenario.
+    if "pdf_data" in st.session_state:
+        del st.session_state["pdf_data"]
+    if "excel_data" in st.session_state:
+        del st.session_state["excel_data"]
+        
+    st.rerun() # Force a UI refresh to draw the charts outside the button loop
+
+# ==========================================
+# 5. POST-SIMULATION: REPORTING, CHARTS & AI
+# ==========================================
+# UI rendering now lives OUTSIDE the execute button
+if st.session_state.simulation_run:
     
-    df_lines = df_results[["Age", "Median Trajectory", "Target Net Worth"]].melt("Age", var_name="Scenario", value_name="Net Worth")
+    st.subheader("Simulated Wealth Trajectory")
+    df_lines = st.session_state.df_results[["Age", "Median Trajectory", "Target Net Worth"]].melt("Age", var_name="Scenario", value_name="Net Worth")
     color_scale = alt.Scale(domain=["Median Trajectory","Target Net Worth"], range=["#3182bd", "#e74c3c"])
     
     lines = alt.Chart(df_lines).mark_line().encode(
@@ -703,69 +812,47 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
         tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Scenario:N", title="Scenario"), alt.Tooltip("Net Worth:Q", format="$,.0f", title="Net Worth")]
     )
     
-    area = alt.Chart(df_results).mark_area(opacity=0.2, color="#3182bd").encode(
+    area = alt.Chart(st.session_state.df_results).mark_area(opacity=0.2, color="#3182bd").encode(
         x=alt.X("Age:Q"), y=alt.Y("Worst-Case:Q", title="Net Worth ($)"), y2="Best-Case:Q",
-        tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Best-Case:Q", format="$,.0f", title="Best-Case (90th %ile)"), alt.Tooltip("Worst-Case:Q", format="$,.0f", title="Worst-Case (10th %ile)")]
+        tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Best-Case:Q", format="$,.0f", title="Best-Case"), alt.Tooltip("Worst-Case:Q", format="$,.0f", title="Worst-Case")]
     )
     
-    chart = (area + lines).interactive()
-    st.altair_chart(chart, width='stretch')
+    st.altair_chart((area + lines).interactive(), width='stretch')
     
     st.subheader("Median Wealth Composition (Liquidity Breakdown)")
     st.caption("This chart breaks down your median trajectory so you can identify if your wealth is tied up in illiquid assets.")
 
-    df_comp = pd.DataFrame({
-        "Age": ages_array,
-        "Uninvested Cash": p50_cash,
-        "Invested Portfolio": p50_invest,
-        "Locked CPF": p50_cpf
-    }).round(0)
-
-    df_comp_melted = df_comp.melt("Age", var_name="Asset Class", value_name="Value")
-
+    df_comp_melted = st.session_state.df_comp.melt("Age", var_name="Asset Class", value_name="Value")
     comp_chart = alt.Chart(df_comp_melted).mark_area().encode(
         x=alt.X("Age:Q", axis=alt.Axis(tickMinStep=1, format="d")),
         y=alt.Y("Value:Q", axis=alt.Axis(format="$,.0f"), title="Median Net Worth ($)"),
         color=alt.Color("Asset Class:N",
-                        scale=alt.Scale(
-                            domain=["Locked CPF", "Invested Portfolio", "Uninvested Cash"], 
-                            range=["#bdc3c7", "#3182bd", "#2ecc71"] 
-                        ),
+                        scale=alt.Scale(domain=["Locked CPF", "Invested Portfolio", "Uninvested Cash"], range=["#bdc3c7", "#3182bd", "#2ecc71"]),
                         legend=alt.Legend(title="Asset Type", orient="bottom")),
-        tooltip=[
-            alt.Tooltip("Age:Q", title="Age"),
-            alt.Tooltip("Asset Class:N", title="Category"),
-            alt.Tooltip("Value:Q", format="$,.0f", title="Amount")
-        ]
+        tooltip=[alt.Tooltip("Age:Q", title="Age"), alt.Tooltip("Asset Class:N", title="Category"), alt.Tooltip("Value:Q", format="$,.0f", title="Amount")]
     ).interactive()
 
     st.altair_chart(comp_chart, width='stretch')
     
-    final_median = p50[-1]
-    final_p10 = p10[-1]
-    final_cash = cash_only_trajectory[-1]
-    final_cpf = p50_cpf[-1]
-    prob_success = np.mean(all_trajectories[:, -1] >= target_nw) * 100
-
-    # Dynamically display 5 columns if CPF is included, or 4 if it is excluded
+    # 5-Column layout if CPF included, else 4
     if include_cpf_in_nw:
         col_res1, col_res2, col_res3, col_res4, col_res5 = st.columns(5)
-        col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
-        col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
-        col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
-        col_res4.metric("Hypothetical: 100% Bank", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
-        col_res5.metric("Amount Locked in CPF", f"${final_cpf:,.0f}")
+        col_res1.metric("Probability of Goal", f"{st.session_state.prob_success:.1f}%")
+        col_res2.metric("Median Expected Total", f"${st.session_state.final_median:,.0f}")
+        col_res3.metric("Downside Stress Floor", f"${st.session_state.final_p10:,.0f}")
+        col_res4.metric("Hypothetical: 100% Bank", f"${st.session_state.final_cash:,.0f}")
+        col_res5.metric("Amount Locked in CPF", f"${st.session_state.final_cpf:,.0f}")
     else:
         col_res1, col_res2, col_res3, col_res4 = st.columns(4)
-        col_res1.metric("Probability of Goal", f"{prob_success:.1f}%")
-        col_res2.metric(f"Median Expected Total", f"${final_median:,.0f}")
-        col_res3.metric("Downside Stress Floor", f"${final_p10:,.0f}")
-        col_res4.metric("Hypothetical: 100% Bank", f"${final_cash:,.0f}", help="Your final wealth if you kept all surplus in the bank at the cash yield rate, strictly excluding CPF and market returns.")
+        col_res1.metric("Probability of Goal", f"{st.session_state.prob_success:.1f}%")
+        col_res2.metric("Median Expected Total", f"${st.session_state.final_median:,.0f}")
+        col_res3.metric("Downside Stress Floor", f"${st.session_state.final_p10:,.0f}")
+        col_res4.metric("Hypothetical: 100% Bank", f"${st.session_state.final_cash:,.0f}")
 
-    if prob_success >= 75: 
-        st.success(f"✅ High confidence path: {prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
-    elif prob_success >= 50: 
-        st.warning(f"⚠️ Moderate confidence ({prob_success:.1f}%). Consider increasing monthly savings or reducing milestone drag.")
+    if st.session_state.prob_success >= 75: 
+        st.success(f"✅ High confidence path: {st.session_state.prob_success:.1f}% chance of exceeding ${target_nw:,.0f} by age {target_age}.")
+    elif st.session_state.prob_success >= 50: 
+        st.warning(f"⚠️ Moderate confidence ({st.session_state.prob_success:.1f}%). Consider increasing monthly savings or reducing milestone drag.")
     else: 
         st.error(f"🚨 High shortfall risk. Adjust timeline, lower milestone outflows, or modify asset return targets.")
 
@@ -773,63 +860,23 @@ if st.button("🚀 Execute Simulation", type="primary", disabled=not valid_budge
     st.subheader(f"📊 Terminal Wealth Distribution at Age {target_age}")
     st.caption("Notice the log-normal, right-tail skew: the median outcome is highly localized, but extreme bull markets stretch the upside.")
     
-    final_nw_raw = all_trajectories[:, -1] / (((1 + inflation_rate) ** (num_steps - 1)) if "Today's Value" in display_mode else 1)
-    hist_counts, bin_edges = np.histogram(final_nw_raw, bins=40)
+    hist_counts, bin_edges = np.histogram(st.session_state.final_nw_raw, bins=40)
     bin_mids = (bin_edges[:-1] + bin_edges[1:]) / 2
-    
     df_hist = pd.DataFrame({"Frequency": hist_counts, "Net Worth Bracket": [f"${x/1000000:.1f}M" for x in bin_mids]}).set_index("Net Worth Bracket")
     st.bar_chart(df_hist)
-    
-    df_report = pd.DataFrame({
-        "Year": years_array,
-        "Age": ages_array,
-        "Take-Home Salary": report_salary,
-        "Housing (Rent/Mortgage)": report_rent,
-        "Food & Dining": report_food,
-        "Utilities & Telco": report_util,
-        "Transport": report_trans,
-        "Leisure": report_ent,
-        "Insurance": report_ins,
-        "Custom Spends": report_custom,
-        "Total Cash Living Expenses": report_expenses,
-        "Major Events (Capex)": report_capex,
-        "Median Invested Net Worth": p50,
-        "Total CPF Balance": p50_cpf,
-        "100% Cash Baseline": cash_only_trajectory
-    }).round(0)
-    
-    # --- SAVE TO SESSION STATE SO IT SURVIVES BUTTON CLICKS ---
-    st.session_state.df_report = df_report
-    st.session_state.prob_success = prob_success
-    st.session_state.initial_total_nw = initial_total_nw
-    st.session_state.final_median = final_median
-    st.session_state.final_cash = final_cash
-    st.session_state.final_cpf = final_cpf
-    st.session_state.simulation_run = True
 
-# ==========================================
-# 5. POST-SIMULATION: REPORTING & AI
-# ==========================================
-# This guardrail ensures the UI only loads AFTER a successful simulation
-if st.session_state.simulation_run:
     st.divider()
     
-    # Show the table in a clean, collapsible expander
-    with st.expander("🔍 View Itemized Year-by-Year Financial Ledger", expanded=False):
-        st.dataframe(st.session_state.df_report, width='stretch')
+    # --- PDF REPORT & AI SUMMARY ---
+    st.subheader("🤖 Generate Executive PDF Report")
+    st.caption("The AI will analyze your trajectory, assign a financial score, and bundle a custom narrative into a PDF alongside your charts and ledger.")
     
-    # --- AI EXECUTIVE SUMMARY & EXCEL EXPORT ---
-    st.subheader("🤖 Generate Smart Excel Report")
-    st.caption("The AI will analyze your specific expenses and bundle a custom narrative directly into an Excel file alongside your ledger.")
-    
-    # Setup an expander for API Key input so you don't hardcode it
     api_key = st.text_input("Enter Gemini API Key:", type="password")
     
-    if st.button("Generate Excel Report") and api_key:
+    if st.button("Generate PDF Report") and api_key:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-flash-latest')
         
-        # Structure the prompt with the exact simulation results AND specific expenses
         prompt = f"""
         You are an expert, empathetic financial advisor. Summarize the following Monte Carlo financial simulation for a {target_age - current_age}-year forecast.
         
@@ -848,48 +895,122 @@ if st.session_state.simulation_run:
         - Insurance: ${other_exp}
         - Custom/Other: ${custom_spending_total}
         
-        Write a 3-paragraph executive summary. 
-        Paragraph 1: Assess their probability of success and overall trajectory.
-        Paragraph 2: Analyze their monthly expenses. Identify 1 or 2 specific categories from the list above where they could reasonably cut back to increase their investment allocation and accelerate compounding.
-        Paragraph 3: Give a concrete piece of advice comparing their invested trajectory versus the baseline of holding 100% cash.
+        Write a 4-paragraph executive summary. 
+        Paragraph 1: Assess their financial health and assign a score using the exact format "Financial Score: X/5 Stars". Briefly justify this score. (Do NOT use emojis).
+        Paragraph 2: Assess their probability of success and overall trajectory.
+        Paragraph 3: Analyze their monthly expenses. Identify 1 or 2 specific categories from the list above where they could reasonably cut back.
+        Paragraph 4: Give a concrete piece of advice comparing their invested trajectory versus the baseline of holding 100% cash.
         Do not use generic disclaimers. Tone should be professional, candid, and highly actionable.
         """
         
-        with st.spinner("Analyzing expenses and building Excel report..."):
+        with st.spinner("Analyzing expenses and building PDF report..."):
+            # 1. Attempt to get the AI Text
             try:
-                # 1. Get the AI Response
                 response = model.generate_content(prompt)
                 ai_text = response.text
-                
-                # 2. Build the Excel File in Memory
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    # Write the DataFrame to Sheet 1
-                    st.session_state.df_report.to_excel(writer, sheet_name='Financial Ledger', index=False)
-                    
-                    # Write the AI Narrative to Sheet 2
-                    workbook = writer.book
-                    summary_sheet = workbook.add_worksheet('AI Executive Summary')
-                    
-                    format_wrap = workbook.add_format({'text_wrap': True, 'valign': 'top'})
-                    format_bold = workbook.add_format({'bold': True, 'font_size': 14})
-                    
-                    summary_sheet.set_column('A:A', 120) # Make the column wide enough to read like a document
-                    summary_sheet.write('A1', "AI Executive Summary", format_bold)
-                    summary_sheet.write('A3', ai_text, format_wrap)
-                    
-                # Save to session state
-                st.session_state.excel_data = output.getvalue()
-                
             except Exception as e:
-                st.error(f"Failed to generate report: {e}")
+                st.warning("⚠️ API Quota Exceeded. Generating PDF without the AI Executive Summary.")
+                ai_text = "Financial Score: N/A\n\nThe AI executive summary is temporarily unavailable because the API quota was exceeded. However, your detailed charts and financial ledger have been successfully generated below for your review."
+
+            # 2. Build the PDF (Runs even if AI fails)
+            try:
+                # Setup PDF Builder
+                class PDF(FPDF):
+                    def header(self):
+                        self.set_font('Arial', 'B', 15)
+                        self.cell(0, 10, 'Wealth Forecast Executive Summary', 0, 1, 'C')
+                        self.ln(5)
+
+                pdf = PDF()
+                pdf.add_page()
+                pdf.set_font('Arial', '', 11)
                 
-    # If the Excel file exists in memory, show the download button
-    if "excel_data" in st.session_state:
-        st.success("✅ Report generated successfully!")
+                # Write AI Narrative (or the fail-safe message)
+                clean_text = ai_text.replace('\u2019', "'").replace('\u201c', '"').replace('\u201d', '"').replace('\u2013', '-')
+                for p in clean_text.split('\n'):
+                    if p.strip():
+                        pdf.multi_cell(0, 6, p.encode('latin-1', 'replace').decode('latin-1'))
+                        pdf.ln(2)
+                
+                # Add Charts via Matplotlib 
+                pdf.add_page()
+                pdf.set_font('Arial', 'B', 14)
+                pdf.cell(0, 10, 'Simulation Visualizations', 0, 1, 'L')
+                
+                # Trajectory Chart
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.plot(st.session_state.df_results['Age'], st.session_state.df_results['Median Trajectory'], color='#3182bd', label='Median Trajectory')
+                ax.plot(st.session_state.df_results['Age'], st.session_state.df_results['Target Net Worth'], color='#e74c3c', linestyle='--', label='Target')
+                ax.fill_between(st.session_state.df_results['Age'], st.session_state.df_results['Worst-Case'], st.session_state.df_results['Best-Case'], color='#3182bd', alpha=0.2)
+                ax.set_title('Simulated Wealth Trajectory')
+                ax.set_xlabel('Age')
+                ax.set_ylabel('Net Worth ($)')
+                ax.legend()
+                plt.tight_layout()
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
+                    fig.savefig(tmpfile.name, format="png", dpi=150)
+                    pdf.image(tmpfile.name, x=10, w=190)
+                plt.close(fig)
+                
+                pdf.ln(5)
+                
+                # Composition Chart
+                fig2, ax2 = plt.subplots(figsize=(8, 4))
+                ax2.stackplot(st.session_state.df_comp['Age'],
+                              st.session_state.df_comp['Locked CPF'],
+                              st.session_state.df_comp['Invested Portfolio'],
+                              st.session_state.df_comp['Uninvested Cash'],
+                              labels=['Locked CPF', 'Invested', 'Cash'],
+                              colors=['#bdc3c7', '#3182bd', '#2ecc71'])
+                ax2.set_title('Median Wealth Composition')
+                ax2.set_xlabel('Age')
+                ax2.set_ylabel('Net Worth ($)')
+                ax2.legend(loc='upper left')
+                plt.tight_layout()
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile2:
+                    fig2.savefig(tmpfile2.name, format="png", dpi=150)
+                    pdf.image(tmpfile2.name, x=10, w=190)
+                plt.close(fig2)
+                
+                # Add Trimmed Financial Ledger
+                pdf.add_page()
+                pdf.set_font('Arial', 'B', 14)
+                pdf.cell(0, 10, 'Itemized Financial Ledger (Key Metrics)', 0, 1, 'L')
+                pdf.set_font('Arial', 'B', 8)
+                
+                cols = ["Age", "Take-Home Salary", "Total Cash Expenses", "Median Invested Net Worth", "100% Cash Baseline"]
+                col_widths = [15, 35, 35, 50, 50]
+                
+                for i, col in enumerate(cols):
+                    pdf.cell(col_widths[i], 8, col, 1, 0, 'C')
+                pdf.ln()
+                
+                pdf.set_font('Arial', '', 8)
+                for _, row in st.session_state.df_report.iterrows():
+                    pdf.cell(col_widths[0], 6, str(int(row["Age"])), 1, 0, 'C')
+                    pdf.cell(col_widths[1], 6, f"${row['Take-Home Salary']:,.0f}", 1, 0, 'R')
+                    pdf.cell(col_widths[2], 6, f"${row['Total Cash Living Expenses']:,.0f}", 1, 0, 'R')
+                    pdf.cell(col_widths[3], 6, f"${row['Median Invested Net Worth']:,.0f}", 1, 0, 'R')
+                    pdf.cell(col_widths[4], 6, f"${row['100% Cash Baseline']:,.0f}", 1, 0, 'R')
+                    pdf.ln()
+                
+                # Format bytes securely for download
+                pdf_bytes = pdf.output(dest='S')
+                if type(pdf_bytes) == str: 
+                    pdf_bytes = pdf_bytes.encode('latin-1', 'replace')
+                
+                st.session_state.pdf_data = pdf_bytes
+                
+            except Exception as pdf_e:
+                st.error(f"Failed to generate PDF document: {pdf_e}")
+                
+    if "pdf_data" in st.session_state:
+        st.success("✅ PDF Report generated successfully!")
         st.download_button(
-            label="📥 Download Complete Report (Excel)",
-            data=st.session_state.excel_data,
-            file_name="wealth_forecast_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            label="📥 Download Executive Summary (PDF)",
+            data=st.session_state.pdf_data,
+            file_name="wealth_forecast_report.pdf",
+            mime="application/pdf"
         )
