@@ -7,12 +7,9 @@ import json
 from .data_jobs2 import (
     get_latest_cashflow_db, get_shares_outstanding_db,
     get_equity_growth_db, get_exchange_rate_for_ticker,
-    perform_finite_horizon_dcf, persist_daily_finite_iv
+    perform_finite_horizon_dcf, persist_daily_finite_iv, get_stock_id
 )
 from .data_jobs import get_stock_id
-from .price_utils import get_current_price
-from .valuation_framework import build_company_profile, get_model_framework, get_screening_rules
-from .valuation_reference import build_fcff_reference_benchmark, get_methodology_gap_notes
 import os
 import sqlite3
 from datetime import datetime, timedelta
@@ -106,118 +103,6 @@ def process_discount_rate_params(request_args_or_form, wacc_value_from_calculato
             flash("Invalid format for custom rate. Using 7.50% fixed rate.", "warning")
 
     return active_rate_type_for_calc, custom_rate_for_calc, selected_rate_type, custom_rate_input_str
-
-
-def resolve_selected_discount_rate(active_rate_type, wacc_value, custom_rate):
-    if active_rate_type == 'custom' and custom_rate is not None:
-        return float(custom_rate)
-    if active_rate_type == 'wacc' and wacc_value is not None:
-        return float(wacc_value)
-    return 0.075
-
-
-def build_perpetual_model_context(conn, stock_id, ticker, valuation_inputs, active_rate_type, custom_rate, legacy_values):
-    stock_row = conn.execute(
-        "SELECT ticker, company_name, sector, industry, country, currency FROM stocks WHERE id = ?",
-        (stock_id,)
-    ).fetchone()
-    latest_financial_row = conn.execute(
-        """
-        SELECT report_year, total_revenue, net_income, free_cash_flow
-        FROM annual_financials
-        WHERE stock_id = ?
-        ORDER BY report_year DESC
-        LIMIT 1
-        """,
-        (stock_id,)
-    ).fetchone()
-    latest_market_row = conn.execute(
-        """
-        SELECT price_date, close, shares_outstanding, total_debt
-        FROM daily_prices
-        WHERE stock_id = ?
-        ORDER BY price_date DESC
-        LIMIT 1
-        """,
-        (stock_id,)
-    ).fetchone()
-    benchmark_market_row = None
-    if latest_financial_row:
-        financial_year_end = f"{latest_financial_row['report_year']}-12-31"
-        benchmark_market_row = conn.execute(
-            """
-            SELECT price_date, close, shares_outstanding, total_debt
-            FROM daily_prices
-            WHERE stock_id = ?
-              AND price_date <= ?
-            ORDER BY price_date DESC
-            LIMIT 1
-            """,
-            (stock_id, financial_year_end)
-        ).fetchone()
-        if not benchmark_market_row:
-            benchmark_market_row = conn.execute(
-                """
-                SELECT price_date, close, shares_outstanding, total_debt
-                FROM daily_prices
-                WHERE stock_id = ?
-                  AND price_date > ?
-                ORDER BY price_date ASC
-                LIMIT 1
-                """,
-                (stock_id, financial_year_end)
-            ).fetchone()
-
-    effective_discount_rate = resolve_selected_discount_rate(active_rate_type, valuation_inputs.get("wacc"), custom_rate)
-    current_price, current_price_timestamp, current_price_source = get_current_price(
-        conn,
-        stock_id=stock_id,
-        ticker=ticker,
-        prefer_realtime=True,
-    )
-    if current_price is None and latest_market_row:
-        current_price = latest_market_row["close"]
-        current_price_timestamp = latest_market_row["price_date"]
-        current_price_source = "daily_prices"
-
-    company_profile = build_company_profile(
-        dict(stock_row) if stock_row else {},
-        dict(latest_financial_row) if latest_financial_row else {},
-    )
-    framework = get_model_framework(company_profile)
-    screening_rules = get_screening_rules()
-    fcff_fx_rate = get_exchange_rate_for_ticker(conn, ticker)
-    fcff_benchmark = build_fcff_reference_benchmark(
-        latest_fcff=latest_financial_row["free_cash_flow"] if latest_financial_row else None,
-        total_debt=benchmark_market_row["total_debt"] if benchmark_market_row else None,
-        shares_outstanding=benchmark_market_row["shares_outstanding"] if benchmark_market_row else None,
-        fx_rate=fcff_fx_rate,
-        discount_rate=effective_discount_rate,
-        scenario_growth_rates={
-            "conservative": valuation_inputs.get("growth_lo"),
-            "moderate": valuation_inputs.get("growth_md"),
-            "optimistic": valuation_inputs.get("growth_hi"),
-        },
-        legacy_values=legacy_values,
-    )
-
-    return {
-        "current_price": current_price,
-        "current_price_timestamp": current_price_timestamp,
-        "current_price_source": current_price_source,
-        "latest_market_date": latest_market_row["price_date"] if latest_market_row else None,
-        "latest_market_close": latest_market_row["close"] if latest_market_row else None,
-        "display_price_date": current_price_timestamp or (latest_market_row["price_date"] if latest_market_row else None),
-        "benchmark_market_date": benchmark_market_row["price_date"] if benchmark_market_row else None,
-        "model_framework": framework,
-        "screening_rules": screening_rules,
-        "methodology_gap_notes": get_methodology_gap_notes(),
-        "fcff_benchmark": fcff_benchmark,
-        "latest_financial_year": latest_financial_row["report_year"] if latest_financial_row else None,
-        "latest_financial_fcff": latest_financial_row["free_cash_flow"] if latest_financial_row else None,
-        "latest_financial_net_income": latest_financial_row["net_income"] if latest_financial_row else None,
-        "latest_total_debt": benchmark_market_row["total_debt"] if benchmark_market_row else None,
-    }
 
 
 def get_latest_intrinsic_value(conn, stock_id, use_fixed=False):
@@ -684,15 +569,10 @@ def value_stock_lookup_from_db():
             iv_series = get_historical_iv_series(conn, stock_id, use_fixed=use_fixed)
             iv_values_only = {k: iv[k] for k in ["conservative", "moderate", "optimistic"]} if iv else {}
 
-        comparison_context = build_perpetual_model_context(
-            conn=conn,
-            stock_id=stock_id,
-            ticker=ticker,
-            valuation_inputs=valuation_inputs,
-            active_rate_type=active_rate_type,
-            custom_rate=custom_rate,
-            legacy_values=iv_values_only,
-        )
+        price_row = conn.execute(
+            "SELECT close, price_date FROM daily_prices WHERE stock_id = ? ORDER BY price_date DESC LIMIT 1",
+            (stock_id,)
+        ).fetchone()
 
         candlestick_data = [
             {
@@ -731,7 +611,7 @@ def value_stock_lookup_from_db():
         
         selected_scenario = request.form.get("comparison_scenario") or "moderate"
         iv_wacc_selected = iv_wacc.get(selected_scenario) if iv_wacc else None
-        price_val = comparison_context["current_price"]
+        price_val = price_row["close"] if price_row else None
         pct = None
         status = None
         if iv_wacc_selected is not None and price_val:
@@ -769,10 +649,8 @@ def value_stock_lookup_from_db():
             iv_series_json=json.dumps(iv_series, default=str),
             iv_values_json=json.dumps(iv_values_only),
             candlestick_json=json.dumps(candlestick_data, default=str),
-            current_price=comparison_context["current_price"],
-            latest_date=comparison_context["display_price_date"],
-            current_price_timestamp=comparison_context["current_price_timestamp"],
-            current_price_source=comparison_context["current_price_source"],
+            current_price=price_row["close"] if price_row else None,
+            latest_date=price_row["price_date"] if price_row else None,
             using_fixed=use_fixed,
             selected_rate_type=selected_rate_type,
             selected_discount_option=selected_rate_type,
@@ -781,16 +659,7 @@ def value_stock_lookup_from_db():
             calculated_wacc_rate=wacc,
             valuation_inputs=valuation_inputs,
             scenarios_list=["conservative", "moderate", "optimistic"],
-            assumptions_are_modified=assumptions_are_modified,
-            model_framework=comparison_context["model_framework"],
-            screening_rules=comparison_context["screening_rules"],
-            methodology_gap_notes=comparison_context["methodology_gap_notes"],
-            fcff_benchmark=comparison_context["fcff_benchmark"],
-            latest_financial_year=comparison_context["latest_financial_year"],
-            latest_financial_fcff=comparison_context["latest_financial_fcff"],
-            latest_financial_net_income=comparison_context["latest_financial_net_income"],
-            latest_total_debt=comparison_context["latest_total_debt"],
-            benchmark_market_date=comparison_context["benchmark_market_date"],
+            assumptions_are_modified=assumptions_are_modified
         )
 
     except Exception as e:
@@ -892,16 +761,6 @@ def update_valuation_results_db():
                 iv_series = get_historical_iv_series(conn, stock_id, use_fixed=True)
                 iv_values_only = {k: iv[k] for k in ["conservative", "moderate", "optimistic"]} if iv else {}
 
-        comparison_context = build_perpetual_model_context(
-            conn=conn,
-            stock_id=stock_id,
-            ticker=ticker,
-            valuation_inputs=merged_inputs,
-            active_rate_type=active_rate_type_for_calc,
-            custom_rate=custom_rate,
-            legacy_values=iv_values_only,
-        )
-
         price_rows = conn.cursor().execute("""
             SELECT price_date, open, high, low, close
             FROM daily_prices
@@ -921,8 +780,13 @@ def update_valuation_results_db():
             if None not in (row["open"], row["high"], row["low"], row["close"])
         ]
 
-        current_price = comparison_context["current_price"]
-        latest_date = comparison_context["display_price_date"]
+        price_row = conn.cursor().execute(
+            "SELECT close, price_date FROM daily_prices WHERE stock_id=? ORDER BY price_date DESC LIMIT 1",
+            (stock_id,)
+        ).fetchone()
+
+        current_price = price_row["close"] if price_row else None
+        latest_date = price_row["price_date"] if price_row else None
         
         display_name_row = conn.execute("SELECT company_name FROM stocks WHERE id = ?", (stock_id,)).fetchone()
         display_name = display_name_row["company_name"] if display_name_row else ticker.upper()
@@ -941,8 +805,6 @@ def update_valuation_results_db():
                                candlestick_json=json.dumps(candlestick_data, default=str),
                                current_price=current_price,
                                latest_date=latest_date,
-                               current_price_timestamp=comparison_context["current_price_timestamp"],
-                               current_price_source=comparison_context["current_price_source"],
                                using_fixed=use_fixed,
                                selected_rate_type=selected_rate_type,
                                selected_comparison_scenario=selected_scenario,
@@ -953,16 +815,7 @@ def update_valuation_results_db():
                                selected_discount_option=selected_rate_type,
                                selected_custom_rate=custom_rate_input_str,
                                assumptions_are_modified=assumptions_are_modified,
-                               active_page="wacc",
-                               model_framework=comparison_context["model_framework"],
-                               screening_rules=comparison_context["screening_rules"],
-                               methodology_gap_notes=comparison_context["methodology_gap_notes"],
-                               fcff_benchmark=comparison_context["fcff_benchmark"],
-                               latest_financial_year=comparison_context["latest_financial_year"],
-                               latest_financial_fcff=comparison_context["latest_financial_fcff"],
-                               latest_financial_net_income=comparison_context["latest_financial_net_income"],
-                               latest_total_debt=comparison_context["latest_total_debt"],
-                               benchmark_market_date=comparison_context["benchmark_market_date"])
+                               active_page="wacc")
     except Exception as e:
         current_app.logger.error(f"[ERROR] update_valuation_results_db failed: {e}", exc_info=True)
         flash("Something went wrong during the update.", "error")
@@ -1038,15 +891,10 @@ def reset_valuation_defaults_db():
         iv_series = get_historical_iv_series(conn, stock_id, use_fixed=use_fixed)
         iv_values_only = {k: iv[k] for k in ["conservative", "moderate", "optimistic"]} if iv else {}
 
-        comparison_context = build_perpetual_model_context(
-            conn=conn,
-            stock_id=stock_id,
-            ticker=ticker,
-            valuation_inputs=valuation_inputs,
-            active_rate_type=active_rate_type,
-            custom_rate=None,
-            legacy_values=iv_values_only,
-        )
+        price_row = conn.execute(
+            "SELECT close, price_date FROM daily_prices WHERE stock_id = ? ORDER BY price_date DESC LIMIT 1",
+            (stock_id,)
+        ).fetchone()
 
         candlestick_data = [
             {
@@ -1076,10 +924,8 @@ def reset_valuation_defaults_db():
             iv_series_json=json.dumps(iv_series, default=str),
             iv_values_json=json.dumps(iv_values_only),
             candlestick_json=json.dumps(candlestick_data, default=str),
-            current_price=comparison_context["current_price"],
-            latest_date=comparison_context["display_price_date"],
-            current_price_timestamp=comparison_context["current_price_timestamp"],
-            current_price_source=comparison_context["current_price_source"],
+            current_price=price_row["close"] if price_row else None,
+            latest_date=price_row["price_date"] if price_row else None,
             using_fixed=True,
             selected_rate_type=active_rate_type,
             selected_discount_option=active_rate_type,
@@ -1088,16 +934,7 @@ def reset_valuation_defaults_db():
             calculated_wacc_rate=wacc,
             valuation_inputs=valuation_inputs,
             scenarios_list=["conservative", "moderate", "optimistic"],
-            assumptions_are_modified=False,
-            model_framework=comparison_context["model_framework"],
-            screening_rules=comparison_context["screening_rules"],
-            methodology_gap_notes=comparison_context["methodology_gap_notes"],
-            fcff_benchmark=comparison_context["fcff_benchmark"],
-            latest_financial_year=comparison_context["latest_financial_year"],
-            latest_financial_fcff=comparison_context["latest_financial_fcff"],
-            latest_financial_net_income=comparison_context["latest_financial_net_income"],
-            latest_total_debt=comparison_context["latest_total_debt"],
-            benchmark_market_date=comparison_context["benchmark_market_date"],
+            assumptions_are_modified=False
         )
 
     except Exception as e:
