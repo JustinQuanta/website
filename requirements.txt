@@ -1,5 +1,6 @@
 streamlit
 website
+flask-mail
 Flask
 Flask-Login
 Flask-SQLAlchemy
