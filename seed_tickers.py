@@ -8,10 +8,10 @@ DB_PATH = os.path.join('instance', 'financial_data.db')
 # You can easily add, remove, or move tickers between categories here.
 TICKERS_BY_MARKET = {
     'US': [
-        'AAPL', 'ADBE', 'AMD', 'AMZN', 'AVGO', 'BABA', 'BAC', 'BRK-B' ,'CMG', 'COST', 'CRM', 
-        'CRWD', 'DIS', 'DOCU', 'ENPH', 'FVRR', 'GOOG', 'GOOGL', 'GRAB', 'HD', 'JD', 'JNJ', 
-        'KR', 'LULU', 'MA', 'MELI', 'META', 'MSFT', 'NKE', 'NVDA', 'NVO', 'PATH', 'PG',
-        'PLTR', 'SBUX', 'SHOP', 'T', 'TCEHY', 'TSLA', 'TSM', 'UNH', 'V', 'WMT'
+        'AAPL', 'ADBE', 'AMD', 'AMZN', 'AVGO', 'BABA', 'BAC', 'BRK-B', 'CELH', 'CMG', 'COST', 'CRM', 
+        'CRWD', 'DIS', 'DOCU', 'ENPH', 'FVRR', 'FTNT', 'GOOG', 'GOOGL', 'GRAB', 'HD', 'INTC','JD', 
+        'JNJ', 'KO','KR', 'LULU', 'MA', 'MELI', 'META', 'MSFT', 'NKE', 'NOW','NVDA', 'NVO', 'PATH', 
+        'PG', 'PLTR', 'SBUX', 'SHOP', 'T', 'TCEHY', 'TSLA', 'TSM', 'UNH', 'V', 'WMT'
     ]#,
     #'HK': [
     #    '1299.HK', '1788.HK', '9988.HK', '2828.HK', '2800.HK', '3033.HK', 

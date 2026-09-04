@@ -109,9 +109,9 @@ CREATE TABLE IF NOT EXISTS analyst_growth_estimates (
     id INTEGER PRIMARY KEY,
     stock_id INTEGER NOT NULL,
     estimate_date DATE NOT NULL,
-    growth_next_year REAL,
-    growth_next_5_years REAL,
-    equity_growth REAL,
+    growth_conservative REAL,
+    growth_moderate REAL,
+    growth_optimistic REAL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(stock_id, estimate_date),
     FOREIGN KEY(stock_id) REFERENCES stocks(id)
