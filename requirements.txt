@@ -2,6 +2,7 @@ streamlit
 website
 flask-mail
 apscheduler
+flask_session
 Flask
 Flask-Login
 Flask-SQLAlchemy
