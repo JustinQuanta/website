@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Valuation Summary{% endblock %}
+
+{% block content %}
+<style>
+  .container {
+    max-width: 98vw !important;
+    width: 98vw !important;
+  }
+  .table-responsive {
+    min-width: 1000px;
+    width: 80vw !important;
+    margin: 0 auto;
+  }
+  .summary-table th, .summary-table td {
+    text-align: center;
+    vertical-align: middle;
+    white-space: normal;
+    font-size: 1.08em;
+    padding: 12px 8px;
+    min-width: 120px;
+  }
+  .summary-table th {
+    font-size: 1.03em;
+  }
+  .summary-table td {
+    font-size: 1.08em;
+  }
+  .summary-table th[scope="col"] {
+    min-width: 130px;
+  }
+  .status-overvalued { background: #f8d7da !important; color: #b71c1c; }
+  .status-undervalued { background: #d4edda !important; color: #155724; }
+  .scenario-selector { margin-bottom: 1.2rem;}
+  .card label { font-size: 15px; }
+  .btn-primary { min-width: 120px; }
+  .card { border-radius: 10px; }
+  input[type="number"].form-control-sm { font-size: 16px; }
+  .error-message { color: red; font-weight:bold; margin-bottom:1rem; }
+</style>
+
+<div class="container py-4">
+  <h2 class="text-center mb-3"><i class="fa fa-table mr-1"></i> Valuation Summary</h2>
+  <form id="scenarioForm" class="scenario-selector text-center mb-4" method="post">
+    <label for="scenario">Select Scenario:</label>
+    <select id="scenario" name="scenario" onchange="this.form.submit()">
+      <option value="moderate" {% if selected_scenario == "moderate" %}selected{% endif %}>Moderate</option>
+      <option value="conservative" {% if selected_scenario == "conservative" %}selected{% endif %}>Conservative</option>
+      <option value="optimistic" {% if selected_scenario == "optimistic" %}selected{% endif %}>Optimistic</option>
+    </select>
+    <input type="hidden" name="wacc_weight" value="{{ wacc_weight }}">
+    <input type="hidden" name="dcf_weight" value="{{ dcf_weight }}">
+    <input type="hidden" name="wacc_type" value="{{ selected_wacc_type }}">
+    <input type="hidden" name="dcf_type" value="{{ selected_dcf_type }}">
+  </form>
+
+  {% if error_message %}
+    <div class="error-message text-center">{{ error_message }}</div>
+  {% endif %}
+
+  <form id="weightage-form" method="post" action="{{ url_for('views.valuation_summary') }}">
+      <div class="card mx-auto mb-4" style="max-width: 600px; box-shadow:0 2px 6px rgba(0,0,0,0.07);">
+        <div class="card-body p-3">
+          <div class="row align-items-center">
+            <!-- WACC Row -->
+            <div class="col-sm-5 mb-2 mb-sm-0 d-flex align-items-center">
+              <label class="font-weight-bold mb-0 mr-2" style="min-width:130px;"><i class="fa fa-balance-scale"></i> WACC Weight</label>
+              <input type="number" step="0.01" min="0" max="1" name="wacc_weight" value="{{ wacc_weight or 0.5 }}" class="form-control form-control-sm" style="width:90px;">
+            </div>
+            <div class="col-sm-7 d-flex align-items-center">
+              <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                <label class="btn btn-outline-primary btn-sm {% if selected_wacc_type == 'wacc' %}active{% endif %}">
+                  <input type="radio" name="wacc_type" value="wacc" {% if selected_wacc_type == "wacc" %}checked{% endif %}> WACC IV
+                </label>
+                <label class="btn btn-outline-primary btn-sm {% if selected_wacc_type == 'fixed' %}active{% endif %}">
+                  <input type="radio" name="wacc_type" value="fixed" {% if selected_wacc_type == "fixed" %}checked{% endif %}> 7.5% IV
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="row align-items-center mt-2">
+            <!-- DCF Row -->
+            <div class="col-sm-5 mb-2 mb-sm-0 d-flex align-items-center">
+              <label class="font-weight-bold mb-0 mr-2" style="min-width:130px;"><i class="fa fa-balance-scale"></i> DCF Weight</label>
+              <input type="number" step="0.01" min="0" max="1" name="dcf_weight" value="{{ dcf_weight or 0.5 }}" class="form-control form-control-sm" style="width:90px;">
+            </div>
+            <div class="col-sm-7 d-flex align-items-center">
+              <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                <label class="btn btn-outline-primary btn-sm {% if selected_dcf_type == 'fcf' or not selected_dcf_type %}active{% endif %}">
+                  <input type="radio" name="dcf_type" value="fcf" autocomplete="off"
+                    {% if selected_dcf_type == 'fcf' or not selected_dcf_type %}checked{% endif %}>
+                  Free Cash Flow
+                </label>
+                <label class="btn btn-outline-primary btn-sm {% if selected_dcf_type == 'ni' %}active{% endif %}">
+                  <input type="radio" name="dcf_type" value="ni" autocomplete="off"
+                    {% if selected_dcf_type == 'ni' %}checked{% endif %}>
+                  Net Income
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col text-center mt-3">
+              <button type="submit" class="btn btn-primary btn-sm">Apply Weightages <i class="fa fa-check ml-1"></i></button>
+              <span style="color:red; margin-left:10px;" id="weight-warning"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+
+  <div class="table-responsive">
+    <table class="table table-bordered summary-table" id="valuationSummaryTable">
+      <thead>
+    <tr>
+      <th>Ticker</th>
+      <th>IV (WACC Model)</th>
+      <th>IV (7.5% RR)</th>
+      <th>DCF IV (Free Cash Flow)</th>
+      <th>DCF IV (Net Income)</th>
+      <th>Required Return</th>
+      <th>Margin of Safety</th>
+      <th>Price</th>
+      <th>Weighted Intrinsic Value</th>
+      <th>%</th>
+      <th>Status</th>
+      <th>Updated</th>
+      <th>Actions</th>
+    </tr>
+    </thead>
+    <tbody>
+        {% for row in valuation_summary %}
+        <tr>
+            <td>{{ row.ticker|upper }}</td>
+            {% set wacc_key = "iv_wacc_" + selected_scenario %}
+            <td>
+              {% if row[wacc_key] is defined and row[wacc_key] is not none %}
+                ${{ row[wacc_key]|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            {% set fixed_key = "iv_fixed_" + selected_scenario %}
+            <td>
+              {% if row[fixed_key] is defined and row[fixed_key] is not none %}
+                ${{ row[fixed_key]|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            {% set dcf_fcf_key = "dcf_iv_" + selected_scenario + "_fcf" %}
+            {% set dcf_ni_key = "dcf_iv_" + selected_scenario + "_ni" %}
+            <td>
+              {% if row[dcf_fcf_key] is defined and row[dcf_fcf_key] is not none %}
+                ${{ row[dcf_fcf_key]|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row[dcf_ni_key] is defined and row[dcf_ni_key] is not none %}
+                ${{ row[dcf_ni_key]|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>{{ row.required_return if row.required_return is defined else "" }}</td>
+            <td>{{ row.margin_of_safety_display if row.margin_of_safety_display is defined else "" }}</td>
+            <td>
+              {% if row.price is not none %}
+                ${{ row.price|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row.weighted_iv %}
+                {{ row.weighted_iv }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row.pct is not none %}
+                {{ row.pct|round(2) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td class="status-{{ row.status|lower }}">{{ row.status }}</td>
+            <td>{{ row.updated }}</td>
+            <td>
+              <form method="post" action="{{ url_for('views.delete_ticker_from_summary') }}" style="display:inline;">
+                <input type="hidden" name="ticker" value="{{ row.ticker }}">
+                <button type="submit" class="btn btn-danger btn-sm" title="Delete"><i class="fa fa-trash"></i></button>
+              </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    </table>
+  </div>
+  <div class="text-center mt-3">
+    <button class="btn btn-info" onclick="exportValuationSummary()">
+      <i class="fa fa-download mr-1"></i> Export Table to CSV
+    </button>
+  </div>
+</div>
+<script>
+function exportValuationSummary() {
+  let table = document.getElementById('valuationSummaryTable');
+  if(!table) return;
+  let csv = [];
+  for(let row of table.rows) {
+    let rowData = [];
+    for(let cell of row.cells) {
+      let val = cell.innerText.replace(/"/g, '""');
+      rowData.push('"' + val + '"');
+    }
+    csv.push(rowData.join(','));
+  }
+  let csvString = csv.join('\n');
+  let blob = new Blob([csvString], { type: 'text/csv' });
+  let link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'valuation_summary.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+form.addEventListener("submit", function(e) {
+    let wacc = parseFloat(waccInput.value) || 0;
+    let dcf = parseFloat(dcfInput.value) || 0;
+    if (Math.abs(wacc + dcf - 1) > 0.00001) {
+        e.preventDefault();
+        warning.textContent = "Weights must sum to 1!";
+    } else {
+        warning.textContent = "";
+    }
+});
+
+document.addEventListener("DOMContentLoaded", function() {
+  const waccInput = document.getElementsByName("wacc_weight")[0];
+  const dcfInput = document.getElementsByName("dcf_weight")[0];
+  const warning = document.getElementById("weight-warning");
+  const form = document.getElementById("weightage-form");
+
+  // Only allow editing one field, always sync the other
+  waccInput.addEventListener("input", function() {
+    let wacc = parseFloat(waccInput.value);
+    if (isNaN(wacc)) wacc = 0;
+    wacc = Math.max(0, Math.min(wacc, 1));
+    waccInput.value = wacc.toFixed(2);
+    dcfInput.value = (1 - wacc).toFixed(2);
+    warning.textContent = "";
+  });
+
+  dcfInput.addEventListener("input", function() {
+    let dcf = parseFloat(dcfInput.value);
+    if (isNaN(dcf)) dcf = 0;
+    dcf = Math.max(0, Math.min(dcf, 1));
+    dcfInput.value = dcf.toFixed(2);
+    waccInput.value = (1 - dcf).toFixed(2);
+    warning.textContent = "";
+  });
+
+  form.addEventListener("submit", function(e) {
+    let wacc = parseFloat(waccInput.value) || 0;
+    let dcf = parseFloat(dcfInput.value) || 0;
+    // Only check bounds in JS, let backend handle sum==1 error
+    if (wacc < 0 || wacc > 1 || dcf < 0 || dcf > 1) {
+      e.preventDefault();
+      warning.textContent = "Weights must be between 0 and 1!";
+    } else {
+      warning.textContent = "";
+      // Do NOT prevent submit for sum!=1, let backend error show as error_message in container
+    }
+  });
+});
+</script>
+{% endblock %}

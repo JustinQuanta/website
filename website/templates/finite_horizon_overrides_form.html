@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}DCF Growth Rate Overrides - {{ticker|upper}}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="text-center mb-1">DCF Growth Rate Overrides for:
+        <strong>
+            {% if raw_displayName and raw_displayName.strip() and raw_displayName.strip().upper() != ticker.upper() %}
+                {{ raw_displayName.strip() }} ({{ ticker | upper }})
+            {% else %}
+                {{ ticker|upper }}
+            {% endif %}
+        </strong>
+    </h2>
+    <p class="text-center text-muted mb-4">
+        Override the default growth rates for each scenario below. Enter your own values if you want to customize the DCF calculation.
+    </p>
+
+    <form method="POST" action="{{ url_for('views.update_finite_horizon_valuation') }}">
+        <input type="hidden" name="ticker" value="{{ ticker }}">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header">
+                <h5>Default Growth Rates (%)</h5>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group col-md-4">
+                        <label for="growth_conservative">{{ scenario_names[0] }} Growth</label>
+                        <input type="number" step="0.01" class="form-control" id="growth_conservative" name="growth_conservative"
+                            value="{{ '%.2f'|format(defaults.conservative|float) }}"
+                            placeholder="{{ defaults.conservative|round(2) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="growth_moderate">{{ scenario_names[1] }} Growth</label>
+                        <input type="number" step="0.01" class="form-control" id="growth_moderate" name="growth_moderate"
+                            value="{{ '%.2f'|format(defaults.moderate|float) }}"
+                            placeholder="{{ defaults.moderate|round(2) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="growth_optimistic">{{ scenario_names[2] }} Growth</label>
+                        <input type="number" step="0.01" class="form-control" id="growth_optimistic" name="growth_optimistic"
+                            value="{{ '%.2f'|format(defaults.optimistic|float) }}"
+                            placeholder="{{ defaults.optimistic|round(2) }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="text-center">
+            <button type="submit" class="btn btn-success btn-lg mt-3">Update DCF Calculation</button>
+            <br>
+            <a href="{{ url_for('views.finite_horizon_dcf_form') }}" class="btn btn-link mt-3">Cancel and Start Over</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

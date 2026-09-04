@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Home - Valuation Dashboard{% endblock %} {# Updated title #}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-10">
+            <div class="text-center p-4 mb-3 bg-light rounded shadow-sm">
+                {# Updated h1 and p to be more descriptive of the site's purpose #}
+                <h1 class="display-5">Welcome to Quantarize, {{ user.first_name }}!</h1>
+                <p class="lead">Your Personal Intrinsic Value Calculator & Analysis Dashboard.</p>
+                <p class="text-muted" style="font-size: 0.95rem;">
+                    Use our specialized calculators to estimate the intrinsic value of stocks. 
+                    The notes section below is perfect for jotting down tickers you're researching, 
+                    key assumptions, valuation insights, or any related thoughts.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-7 mb-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="my-0 font-weight-normal"><i class="fa fa-sticky-note-o mr-2"></i>Your Valuation Notes</h4> {# More specific title #}
+                </div>
+                <div class="card-body">
+                    {% if user.notes|length > 0 %}
+                        <ul class="list-group list-group-flush" id="notes">
+                            {% for note in user.notes %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">    
+                                <div>
+                                    {# Allow newlines in notes to be displayed #}
+                                    <p class="mb-1" style="white-space: pre-wrap;">{{ note.data }}</p> 
+                                    <small class="text-muted">
+                                        <em>Added on: 
+                                            <span class="dynamic-datetime" data-utc-datetime="{{ note.date | to_utc_iso }}"> {# <--- USE THE NEW FILTER HERE #}
+                                                {{ note.date.strftime('%Y-%m-%d %H:%M') }} UTC {# Fallback display #}
+                                            </span>
+                                        </em>
+                                    </small>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger ml-3" onClick="deleteNote({{ note.id }})" title="Delete note">
+                                    <i class="fa fa-trash-o"></i>
+                                </button>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <div class="text-center p-3">
+                            <i class="fa fa-folder-open-o fa-3x text-muted mb-2"></i>
+                            {# Updated placeholder text for no notes #}
+                            <p class="text-muted">You haven't added any notes yet. <br>Try jotting down some thoughts on a stock or valuation idea!</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5 mb-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h4 class="my-0 font-weight-normal"><i class="fa fa-plus-circle mr-2"></i>Add a New Note</h4>
+                </div>
+                <div class="card-body">
+                    <form method="POST"> {# This form posts to the current page (views.home) #}
+                        <div class="form-group">
+                            <label for="note">Note Content:</label>
+                            {# Updated placeholder for the textarea #}
+                            <textarea name="note" id="note" class="form-control" rows="5" placeholder="E.g., Research notes for AAPL, WACC assumptions, target price ideas..."></textarea>
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary btn-block"><i class="fa fa-save mr-1"></i> Add Note</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Button to the main "WACC Calculator" #}
+<div class="text-center mt-3 mb-5"> {# Added a bit more margin-bottom #}
+    <a href="{{ url_for('views.value_stock_get_ticker_page') }}" class="btn btn-success btn-lg">
+        <i class="fa fa-calculator mr-2" aria-hidden="true"></i> Go to WACC Calculator 
+    </a>
+    {# Optional: If you want a direct link to the "DCF Calculator" (Finite Horizon) from home too #}
+    <a href="{{ url_for('views.finite_horizon_dcf_form') }}" class="btn btn-info btn-lg ml-md-2 mt-2 mt-md-0">
+        <i class="fa fa-bar-chart mr-2" aria-hidden="true"></i> Go to DCF Calculator
+    </a> 
+</div>
+
+<style>
+    /* Styles from your original snippet - kept for consistency */
+    .list-group-item:hover {
+        background-color: #f8f9fa; 
+    }
+    .card-header h4 {
+        font-size: 1.25rem; 
+    }
+    .display-5 { 
+        font-size: 2.8rem;
+        font-weight: 300;
+        line-height: 1.2;
+    }
+    .lead { /* Slightly adjusted for better fit */
+        font-size: 1.15rem; 
+        font-weight: 300;
+        margin-bottom: 0.5rem;
+    }
+    .text-muted { /* Ensure text-muted within lead is also visible */
+        font-size: 0.95rem;
+    }
+</style>
+
+{% endblock %}

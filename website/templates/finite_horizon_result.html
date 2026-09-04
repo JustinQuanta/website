@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% block title %}DCF Result - {{ ticker | upper }}{% endblock %}
+
+{% block content %}
+<style>
+    html {scroll-behavior: smooth;}
+    .table thead th { text-align: right; vertical-align: middle; }
+    .table thead th:first-child { text-align: left; }
+    .table tbody th { text-align: left; vertical-align: middle; }
+    .table td { text-align: right; vertical-align: middle; }
+    
+    /* --- Styles for original layout (current-price-section, etc.) --- */
+    .current-price-section { text-align: center; margin-top: 1.5rem; margin-bottom: 2rem; padding: 1.5rem; border: 1px solid #e0e0e0; border-radius: 0.3rem; background-color: #f9f9f9; box-shadow: 0 2px 5px rgba(0,0,0,0.07); }
+    .current-price-section h4 { margin-bottom: 0.75rem; font-weight: 500; color: #212529; }
+    .current-price-value { font-size: 2.5rem; font-weight: 700; display: block; margin-top: 0.25rem; line-height: 1.2; }
+    .price-undervalued { color: #28a745 !important; }
+    .price-overvalued { color: #dc3545 !important; }
+    .price-neutral { color: #5a6268; }
+    .valuation-summary-text { font-size: 1.15rem; font-weight: 500; margin-top: 0.75rem; margin-bottom: 0.5rem; }
+    .percentage-diff { font-size: 0.95em; font-style: normal; margin-left: 8px; font-weight: normal; }
+    .comparison-details { font-size: 0.9rem; margin-top: 0.5rem; display: block; color: #6c757d; }
+    .plain-language-summary { margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border-radius: 0.25rem; font-size: 1.05rem; line-height: 1.6; }
+    .plain-language-summary p { margin-bottom: 0.75rem; }
+    .plain-language-summary strong { color: #343a40; }
+    .settings-panel { background-color: #f0f4f8; padding: 1.25rem; border-radius: 0.3rem; margin-bottom: 2rem; border: 1px solid #dee2e6; }
+    .explanation-section { margin-top: 2rem; padding: 1.5rem; background-color: #f8f9fa; border-radius: 0.25rem; font-size: 0.9rem; }
+    .explanation-section h5 { margin-bottom: 1rem; font-weight: 500; }
+    .explanation-section p, .explanation-section ul { line-height: 1.6; margin-bottom: 0.75rem; }
+    .explanation-section ul { padding-left: 1.2rem; }
+    .explanation-section strong { color: #333; }
+
+    /* --- UPDATED SLIDER GROUP STYLES --- */
+    .slider-group { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .slider-group label { margin-right: 1rem; min-width: 140px; font-weight: 500; margin-bottom: 0; }
+    .slider-group .form-control-range { flex-grow: 1; }
+    .slider-value { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-weight: 500; font-size: 1rem; background-color: #e9ecef; padding: 0.25rem 0.5rem; border-radius: 0.25rem; color: #000; min-width: 65px; text-align: center; margin-left: 1rem; }
+
+    /* ---
+    CORRECTED SLIDER STYLES
+    --- */
+    .form-control-range {
+        /* This rule now correctly makes the slider customizable without making it invisible */
+        -webkit-appearance: none;
+        appearance: none;
+        padding: 0;
+        cursor: pointer;
+        /* The "background: transparent;" line has been removed */
+    }
+
+    /* Track Styles */
+    .form-control-range::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 4px;
+    }
+    .form-control-range::-moz-range-track {
+        height: 8px;
+        border-radius: 4px;
+    }
+
+    /* Thumb Styles */
+    .form-control-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-top: -6px; /* Centers the thumb on the track */
+    }
+    .form-control-range::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: none;
+    }
+
+    /* --- COLORING FOR EACH SLIDER --- */
+    /* Blue for Projection Years */
+    #projection_years_slider::-webkit-slider-runnable-track { background: #cce2ff; }
+    #projection_years_slider::-moz-range-track { background: #cce2ff; }
+    #projection_years_slider::-webkit-slider-thumb { background: #007bff; }
+    #projection_years_slider::-moz-range-thumb { background: #007bff; }
+
+    /* Green for Discount Rate */
+    #discount_rate_slider::-webkit-slider-runnable-track { background: #d4edda; }
+    #discount_rate_slider::-moz-range-track { background: #d4edda; }
+    #discount_rate_slider::-webkit-slider-thumb { background: #28a745; }
+    #discount_rate_slider::-moz-range-thumb { background: #28a745; }
+    
+    /* Yellow for Margin of Safety */
+    #margin_of_safety_slider::-webkit-slider-runnable-track { background: #fff3cd; }
+    #margin_of_safety_slider::-moz-range-track { background: #fff3cd; }
+    #margin_of_safety_slider::-webkit-slider-thumb { background: #ffc107; }
+    #margin_of_safety_slider::-moz-range-thumb { background: #ffc107; }
+    
+    /* --- Replicated Card and Gauge Styles --- */
+    .current-price-section {
+        text-align: center;
+        margin-top: 1.5rem;
+        margin-bottom: 2rem;
+        padding: 1.5rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 0.3rem;
+        background-color: #f9f9f9;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.07);
+    }
+    .current-price-section h4 {
+        margin-bottom: 0.75rem;
+        font-weight: 500;
+        color: #212529;
+    }
+    .current-price-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        display: block;
+        margin-top: 0.25rem;
+        line-height: 1.2;
+    }
+    .price-undervalued { color: #28a745 !important; }
+    .price-overvalued { color: #dc3545 !important; }
+    .price-neutral { color: #5a6268; }
+    
+    .card-section {
+        margin-top: 2rem;
+        margin-bottom: 2rem;
+    }
+    .card {
+        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+        border-radius: 0.5rem;
+    }
+    .card-header {
+        font-weight: bold;
+        font-size: 1.25rem;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+        text-align: center;
+    }
+    .card-body {
+        text-align: center;
+        padding: 1.5rem 1rem;
+    }
+    .gauge-diff {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-top: 1rem;
+    }
+    .gauge-status {
+        margin-top: .7rem;
+        font-size: 1.2rem;
+        font-weight: 500;
+    }
+    .scenario-tooltip {
+        cursor: pointer;
+        border-bottom: 1px dotted #999;
+        text-decoration: none;
+        color: #007bff;
+        font-size: 0.95em;
+    }
+</style>
+
+<div class="container mt-4">
+     <h2 class="text-center mb-4">
+        DCF Valuation for
+        <strong>
+            {% if raw_displayName and raw_displayName.strip() and raw_displayName.strip().upper() != ticker.upper() %}
+                {{ raw_displayName.strip() }} ({{ ticker.upper() }})
+            {% else %}
+                {{ ticker.upper() }}
+            {% endif %}
+        </strong>
+    </h2>
+    
+    <div class="current-price-section">
+    <div class="text-center mb-4">
+        <h2>Current Market Price: {{ ticker | upper }}</h2>
+        <div class="current-price-value">${{ "%.2f"|format(current_price) }}</div>
+        <div style="font-size: 1.15rem; color: #333; margin-top: 0.5rem;">
+            (using Discount Rate of {{ (discount_rate*100)|round(2) }}%)
+        </div>
+    </div>
+        <div class="card-section">
+            <div class="row justify-content-center">
+                {% set scenario_info = {
+                    "conservative": {"label": "Conservative Scenario", "info": "Assumes lower revenue growth, lower margins, and cautious FCFE ratio."},
+                    "moderate": {"label": "Moderate Scenario", "info": "Assumes average/expected growth rates and margins."},
+                    "optimistic": {"label": "Optimistic Scenario", "info": "Assumes higher revenue growth and margins than historical/typical."}
+                } %}
+                {% for scenario in scenarios_list %}
+                {% set iv = dcf_cashflow_type == 'ni' and result_ni[scenario] or result_fcf[scenario] %}
+                {% set diff_pct = (current_price - iv) / iv * 100 if iv and current_price else None %}
+                {% set color = (
+                    diff_pct is none and 'price-neutral'
+                    or diff_pct < -30 and 'price-undervalued'
+                    or diff_pct < -10 and 'price-undervalued'
+                    or diff_pct < 10 and 'price-neutral'
+                    or diff_pct < 30 and 'price-overvalued'
+                    or 'price-overvalued'
+                ) %}
+                <div class="col-md-4 mb-3 d-flex flex-column align-items-center">
+                    <div class="card shadow-sm w-100 h-100">
+                        <div class="card-header font-weight-bold text-center">
+                            {{ scenario_info[scenario].label }}
+                            <span class="scenario-tooltip" title="{{ scenario_info[scenario].info }}">
+                                <i class="fa fa-info-circle"></i>
+                            </span>
+                        </div>
+                        <div class="card-body d-flex flex-column align-items-center">
+                            <div style="font-size: 1.1rem; font-weight: 500;">
+                                Intrinsic Value:
+                            </div>
+                            <div style="font-size: 2.1rem; font-weight: 600; color: #222;">
+                                ${{ iv|round(2) if iv is not none else "N/A" }}
+                            </div>
+                            <canvas id="gaugeChart_{{ scenario }}" width="200" height="120" style="max-width: 100%;"></canvas>
+                            <div class="mt-3 text-center">
+                                <div class="gauge-diff {{ color }}">
+                                    {% if diff_pct is not none %}
+                                        {{ diff_pct > 0 and '+' or '' }}{{ diff_pct|round(1) }}%
+                                        <span title="Discount (–)/ Premium (+)." style="cursor:help;">
+                                            <i class="fa fa-info-circle"></i>
+                                        </span>
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </div>
+                                <div class="gauge-status {{ color }}" style="margin-top: .7rem;">
+                                    {% if diff_pct is not none %}
+                                        {% if diff_pct < -30 %}Significantly Undervalued
+                                        {% elif diff_pct < -10 %}Potentially Undervalued
+                                        {% elif diff_pct < 10 %}Fairly Valued
+                                        {% elif diff_pct < 30 %}Potentially Overvalued
+                                        {% else %}Significantly Overvalued{% endif %}
+                                    {% else %}N/A{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+<!--
+   <div class="mb-4">
+        <h5 class="text-center mb-2">Market Price (Candlestick) vs Intrinsic Value (Line)</h5>
+        <div class="shadow-sm rounded p-3 bg-white">
+            <canvas id="valuationChart" height="350"></canvas>
+        </div>
+    </div>
+-->
+
+    <div class="table-responsive shadow-sm rounded p-3 mb-4 bg-white">
+      <table class="table table-bordered">
+          <thead class="thead-light text-center">
+            <tr>
+              <th>Valuation Metrics</th>
+              <th>Conservative</th>
+              <th>Moderate</th>
+              <th>Optimistic</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr>
+              <th>
+                DCF IV ({{ "Free Cash Flow" if dcf_cashflow_type == "fcf" else "Net Income" }})
+              </th>
+              {% for scenario in scenarios_list %}
+                {% set iv = dcf_cashflow_type == 'ni' and result_ni[scenario] or result_fcf[scenario] %}
+                <td>
+                  ${{ iv|round(2) if iv is not none else "N/A" }}
+                </td>
+              {% endfor %}
+            </tr>
+            <tr>
+              <th>Growth Rate (%)</th>
+              {% for scenario in scenarios_list %}
+                <td>
+                  {{ (growth_rates[scenario])|round(2) if growth_rates[scenario] is not none else "N/A" }}%
+                </td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+      <form method="POST" action="{{ url_for('views.finite_horizon_dcf_calculate') }}" id="settingsForm">
+        <input type="hidden" name="ticker" value="{{ ticker }}">
+        <div class="card-header font-weight-bold">
+          Adjust Result Table using Following Metric:
+        </div>
+        <div class="card-body">
+          <!-- DCF Cash Flow Choice -->
+          <div class="mb-4">
+            <label class="font-weight-bold mb-2" for="dcf_cashflow_type">DCF Model: Use Which Cash Flow?</label>
+            <div class="btn-group btn-group-toggle d-flex flex-wrap" data-toggle="buttons">
+              <label class="btn btn-outline-primary btn-sm flex-fill {% if dcf_cashflow_type == 'fcf' or not dcf_cashflow_type %}active{% endif %}">
+                <input type="radio" name="dcf_cashflow_type" value="fcf" autocomplete="off"
+                  {% if dcf_cashflow_type == 'fcf' or not dcf_cashflow_type %}checked{% endif %}> Free Cash Flow
+              </label>
+              <label class="btn btn-outline-primary btn-sm flex-fill {% if dcf_cashflow_type == 'ni' %}active{% endif %}">
+                <input type="radio" name="dcf_cashflow_type" value="ni" autocomplete="off"
+                  {% if dcf_cashflow_type == 'ni' %}checked{% endif %}> Net Income
+              </label>
+            </div>
+          </div>
+          <!-- Projection Metrics Controls -->
+          <div class="slider-group mb-3">
+            <label for="projection_years" class="mr-3">Projection Years</label>
+            <input type="range" class="form-control-range" id="projection_years_slider"
+              min="5" max="50" step="1" value="{{ projection_years }}">
+            <input type="number" class="slider-value" id="projection_years" name="projection_years"
+              min="5" max="50" step="1" value="{{ projection_years }}">
+          </div>
+          <div class="slider-group mb-3">
+            <label for="discount_rate" class="mr-3">Discount Rate (%)</label>
+            <input type="range" class="form-control-range" id="discount_rate_slider"
+              min="1" max="25" step="0.25" value="{{ '%.2f'|format(discount_rate * 100) }}">
+            <input type="number" class="slider-value" id="discount_rate" name="discount_rate"
+              min="1" max="25" step="0.25" value="{{ '%.2f'|format(discount_rate * 100) }}">
+          </div>
+          <div class="slider-group mb-3">
+            <label for="margin_of_safety" class="mr-3">Margin of Safety (%)</label>
+            <input type="range" class="form-control-range" id="margin_of_safety_slider"
+              min="0" max="100" step="10" value="{{ '%.0f'|format(margin_of_safety * 100) }}">
+            <input type="number" class="slider-value" id="margin_of_safety" name="margin_of_safety"
+              min="0" max="100" step="10" value="{{ '%.0f'|format(margin_of_safety * 100) }}">
+          </div>
+        </div>
+        <div class="card-footer text-right">
+          <button type="submit" name="action" value="update" class="btn btn-info mr-2">
+            <i class="fa fa-refresh mr-1"></i> Update View
+          </button>
+          <button type="submit" name="action" value="reset" class="btn btn-warning"
+            formaction="{{ url_for('views.reset_finite_horizon_defaults') }}"
+            {% if not params_are_modified %}disabled{% endif %}>
+            <i class="fa fa-undo mr-1"></i> Reset to Defaults
+          </button>
+        </div>
+      </form>
+    </div>
+    
+    <div class="plain-language-summary bg-white p-3 rounded shadow-sm mb-4">
+      <p>
+        We estimate <strong>{{ raw_displayName or ticker }}</strong>'s fair value under three scenarios:
+      </p>
+      <ul class="mb-2">
+        {% for scenario in scenarios_list %}
+          {% set iv = dcf_cashflow_type == 'ni' and result_ni[scenario] or result_fcf[scenario] %}
+          {% if iv is not none and iv > 0.001 and current_price is not none %}
+            {% set diff_pct = ((current_price - iv) / iv * 100) %}
+            {% set formatted_pct = "%+.1f"|format(diff_pct) %}
+            {% if diff_pct > 15 %}
+              {% set status_class = 'price-overvalued' %}
+              {% set status_txt = 'significantly overvalued' %}
+            {% elif diff_pct < -15 %}
+              {% set status_class = 'price-undervalued' %}
+              {% set status_txt = 'significantly undervalued' %}
+            {% else %}
+              {% set status_class = 'price-neutral' %}
+              {% set status_txt = 'fairly valued' %}
+            {% endif %}
+            <li>
+              <strong>{{ scenario.capitalize() }}:</strong>
+              Estimated IV <strong>${{ "%.2f"|format(iv) }}</strong>,
+              the stock appears <span class="{{ status_class }}">{{ status_txt }}</span>
+              (difference: {{ formatted_pct }}%).
+            </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+      <p class="mt-3"><em>All scenarios use the selected discount rate: <strong>{{ (discount_rate*100)|round(2) }}%</strong>.</em></p>
+    </div>
+
+    <div class="mt-4 mb-5 text-center">
+        <a href="{{ url_for('views.finite_horizon_overrides') }}" class="btn btn-info mr-2">
+            <i class="fa fa-pencil-square-o mr-1"></i> Adjust Growth Rate Assumptions
+        </a>
+        <a href="{{ url_for('views.finite_horizon_dcf_form') }}" class="btn btn-primary">
+            <i class="fa fa-line-chart mr-1"></i> Calculate Another Stock
+        </a>
+    </div>
+
+    <div class="explanation-section">
+        <h5>Understanding the Model Parameters:</h5>
+        <p>
+            The "<strong>Intrinsic Value</strong>" is an estimate of a stock's true value based on its expected future cash flows. To calculate this, future cash flows are discounted back to their present value.
+        </p>
+        <ul>
+            <li>
+                <strong>Projection Years:</strong> This is the 'finite horizon' — the number of years into the future we will forecast and sum up the cash flows. Unlike the WACC model, this method does not assume the company grows forever (no terminal value).
+            </li>
+            <li>
+                <strong>Discount Rate:</strong> Your personal required rate of return. A higher rate means future cash flows are considered less valuable today, leading to a lower intrinsic value.
+            </li>
+            <li>
+                <strong>Margin of Safety:</strong> A buffer or discount applied to the calculated intrinsic value to account for potential forecasting errors, providing a purchase price below the estimated fair value.
+            </li>
+            <li>
+              <strong>Growth Rate Used:</strong>
+              For each scenario, the growth rate is chosen from analyst estimates (forward-looking growth forecasts) and the company’s historical equity growth. Conservative, moderate, and optimistic scenarios use the lowest, average, and highest rates respectively.
+            </li>
+        </ul>
+        <p>
+          <strong>Key takeaway:</strong> The growth rates directly impact the intrinsic value calculation. The model transparently shows which growth rate was used for each scenario above, combining analyst forecasts and historical equity growth.
+        </p>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+function gaugeNormalizedPosition(pctDiff) {
+  pctDiff = Math.max(-100, Math.min(100, pctDiff));
+  if (pctDiff < -30) {
+    return 0.2 * (pctDiff + 100) / 70;
+  } else if (pctDiff < -10) {
+    return 0.2 + 0.2 * (pctDiff + 30) / 20;
+  } else if (pctDiff < 10) {
+    return 0.4 + 0.2 * (pctDiff + 10) / 20;
+  } else if (pctDiff < 30) {
+    return 0.6 + 0.2 * (pctDiff - 10) / 20;
+  } else {
+    return 0.8 + 0.2 * (Math.min(pctDiff, 100) - 30) / 70;
+  }
+}
+const gaugeBands = [
+  { color: "#2e8b57", label: "Significantly Undervalued" }, // -100% to -30%
+  { color: "#7fc97f", label: "Potentially Undervalued" },   // -30% to -10%
+  { color: "#ffe066", label: "Fairly Valued" },             // -10% to 10%
+  { color: "#ffb347", label: "Potentially Overvalued" },    // 10% to 30%
+  { color: "#e74c3c", label: "Significantly Overvalued" }   // 30% to 100%
+];
+
+document.addEventListener('DOMContentLoaded', function() {
+  const scenarios = {{ scenarios_list|tojson }};
+  const ivs = {{ result|tojson }};
+  const price = {{ current_price|tojson }};
+  scenarios.forEach(function(scenario) {
+    const iv = ivs[scenario];
+    if (!iv || !price) return;
+    const pctDiff = ((price - iv) / iv) * 100;
+    const normalized = gaugeNormalizedPosition(pctDiff);
+
+    const data = {
+      labels: ["", "", "", "", ""],
+      datasets: [{
+        data: [1, 1, 1, 1, 1],
+        backgroundColor: gaugeBands.map(b => b.color),
+        borderWidth: 0,
+        circumference: 180,
+        rotation: 270,
+        cutout: "65%"
+      }]
+    };
+    const config = {
+      type: 'doughnut',
+      data: data,
+      options: {
+        responsive: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: false },
+        }
+      },
+      plugins: [{
+        afterDraw: function(chart) {
+          const ctx = chart.ctx;
+          const width = chart.width, height = chart.height;
+          const centerX = width/2, centerY = height - 10;
+          const angle = Math.PI * (1 + normalized);
+          const r = width * 0.41;
+          const needleLength = r * 0.88;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(
+            centerX + (needleLength-10)*Math.cos(angle-Math.PI/180*3),
+            centerY + (needleLength-10)*Math.sin(angle-Math.PI/180*3)
+          );
+          ctx.lineTo(
+            centerX + (needleLength-10)*Math.cos(angle+Math.PI/180*3),
+            centerY + (needleLength-10)*Math.sin(angle+Math.PI/180*3)
+          );
+          ctx.closePath();
+          ctx.fillStyle = "#16213e";
+          ctx.shadowColor = "rgba(0,0,0,0.25)";
+          ctx.shadowBlur = 4;
+          ctx.fill();
+          ctx.restore();
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 8, 0, 2*Math.PI);
+          ctx.fillStyle = "#16213e";
+          ctx.fill();
+          ctx.restore();
+        }
+      }],
+      animation: true
+    };
+    const canvas = document.getElementById("gaugeChart_" + scenario);
+    if (canvas) {
+      new Chart(canvas, config);
+    }
+  });
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    /**
+     * Creates a 2-way sync between a range slider and a number input field.
+     * @param {string} sliderId - The ID of the <input type="range"> element.
+     * @param {string} numberInputId - The ID of the <input type="number"> element.
+     */
+    function setupSyncedInputs(sliderId, numberInputId) {
+        const slider = document.getElementById(sliderId);
+        const numberInput = document.getElementById(numberInputId);
+
+        if (slider && numberInput) {
+            // 1. When the slider is moved, update the number input's value
+            slider.addEventListener('input', function() {
+                numberInput.value = slider.value;
+            });
+
+            // 2. When a number is typed, update the slider's position
+            numberInput.addEventListener('input', function() {
+                slider.value = numberInput.value;
+            });
+        }
+    }
+
+    // Initialize the synchronization for all three pairs of inputs
+    setupSyncedInputs('projection_years_slider', 'projection_years');
+    setupSyncedInputs('discount_rate_slider', 'discount_rate');
+    setupSyncedInputs('margin_of_safety_slider', 'margin_of_safety');
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    const candlestickData = {{ candlestick_json|safe }};
+    const ivLine = {{ iv_line_json|safe }};
+    console.log("candlestickData", candlestickData);
+    console.log("ivLine", ivLine);
+    const ctx = document.getElementById("valuationChart").getContext("2d");
+    // Convert data to chart.js format
+    const cData = candlestickData.map(d => ({
+        x: new Date(d.x).getTime(),
+        o: d.o,
+        h: d.h,
+        l: d.l,
+        c: d.c
+    }));
+    const ivData = ivLine.map(d => ({
+        x: new Date(d.date).getTime(),
+        y: d.iv
+    }));
+
+    new Chart(ctx, {
+      type: 'candlestick',
+      data: {
+        datasets: [
+          {
+            label: '{{ ticker|upper }} Price',
+            data: cData,
+            pointStyle: 'line'
+          },
+          {
+            type: 'line',
+            label: 'Intrinsic Value',
+            data: ivData,
+            borderColor: '#ffa726',
+            borderWidth: 2,
+            pointRadius: 0,
+            borderDash: [6, 6],
+            fill: false,
+            pointStyle: 'line'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'month' },
+            grid: { display: false },
+            title: { display: true, text: 'Date' }
+          },
+          y: {
+            title: { display: true, text: 'Price ($)' },
+            beginAtZero: false,
+            ticks: {
+              callback: function (value) { return '$' + value; }
+            }
+          }
+        },
+        plugins: {
+          legend: { display: true, position: 'top' }
+        }
+      }
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %} {% block title %}Sign Up{% endblock %}
+
+{% block content %}
+<div class="container mt-4"> {# Add a Bootstrap container for overall page padding if not already in base.html effectively #}
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <form method="POST" class="mt-3">
+                <h3 align="center" class="mb-4">Sign Up</h3>
+
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter email" value="{{ email or '' }}"/>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-md-6">
+                        <label for="firstName">First Name</label>
+                        <input type="text" class="form-control" id="firstName" name="firstName" placeholder="Enter first name" value="{{ first_name or '' }}"/>
+                    </div>
+                    <div class="form-group col-md-6">
+                        <label for="lastName">Last Name</label>
+                        <input type="text" class="form-control" id="lastName" name="lastName" placeholder="Enter last name" value="{{ last_name or '' }}"/>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-md-6">
+                        <label for="passwordOne">Password</label> {# Changed id for clarity #}
+                        <div class="input-group">
+                            <input type="password" class="form-control {% if password_error and 'match' not in password_error %}is-invalid{% endif %}" id="passwordOne" name="password1" placeholder="Enter password">
+                            <div class="input-group-append">
+                                <span class="input-group-text password-toggle" data-target="passwordOne" style="cursor: pointer;">
+                                    <i class="fa fa-eye-slash" aria-hidden="true"></i>
+                                </span>
+                            </div>
+                        </div>
+                        </div>
+                    <div class="form-group col-md-6">
+                        <label for="passwordTwo">Confirm Password</label> {# Changed id for clarity #}
+                        <div class="input-group">
+                            <input type="password" class="form-control {% if password_error and 'match' in password_error %}is-invalid{% endif %}" id="passwordTwo" name="password2" placeholder="Confirm password">
+                            <div class="input-group-append">
+                                <span class="input-group-text password-toggle" data-target="passwordTwo" style="cursor: pointer;">
+                                    <i class="fa fa-eye-slash" aria-hidden="true"></i>
+                                </span>
+                            </div>
+                        </div>
+                        </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="col-12">
+                        {% if password_error %}
+                        <small class="form-text text-danger">{{ password_error }}</small>
+                        {% endif %}
+                        <small class="form-text text-muted mt-1">
+                            Password must be at least 12 characters. Include a mix of uppercase letters, lowercase letters, and symbols (e.g., !@#$%).
+                        </small>
+                    </div>
+                </div>
+
+                <div class="text-center mt-4">
+                    <button type="submit" class="btn btn-primary">Submit</button>
+                </div>
+
+                <div class="text-center mt-3">
+                    <p>Already have an account? <a href="{{ url_for('auth.login') }}">Login here</a></p>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

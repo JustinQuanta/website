@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Valuation Assumptions - {{ticker|upper}}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="text-center mb-1">Valuation Assumptions for:         
+        <strong>
+            {% if raw_displayName and raw_displayName.strip() and raw_displayName.strip() != ticker %}
+                {{ raw_displayName.strip() }} ({{ ticker | upper }})
+            {% else %}
+                {{ ticker|upper }}
+            {% endif %}
+        </strong></h2>
+    <p class="text-center text-muted mb-4">To override the default value, enter your own value in the box provided.</p>
+
+    <form method="POST" action="{{ url_for('views.value_stock_lookup_from_db') }}">
+        <input type="hidden" name="ticker" value="{{ ticker }}">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header">
+                <h5>Default Revenue Growth Rates (%)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive small mb-3">
+                    {{ defaults.rev_growth_html | safe }}
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-md-4">
+                        <label for="rg_bear">{{ scenario_names[0] }} Growth</label> {# Uses first scenario name #}
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="rg_bear" name="rg_bear" value="{{ '%.2f'|format(defaults.rg_bear|float) }}" placeholder="{{ '%.2f'|format(defaults.rg_bear|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="rg_base">{{ scenario_names[1] }} Growth</label> {# Uses second scenario name #}
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="rg_base" name="rg_base" value="{{ '%.2f'|format(defaults.rg_base|float) }}" placeholder="{{ '%.2f'|format(defaults.rg_base|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="rg_bull">{{ scenario_names[2] }} Growth</label> {# Uses third scenario name #}
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="rg_bull" name="rg_bull" value="{{ '%.2f'|format(defaults.rg_bull|float) }}" placeholder="{{ '%.2f'|format(defaults.rg_bull|float) }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header">
+                <h5>Default FCFE / Net Income Ratios (%)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive small mb-3">
+                    {{ defaults.fcfe_html | safe }}
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-md-4">
+                        <label for="fcfe_bear">{{ scenario_names[0] }} Ratio</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="fcfe_bear" name="fcfe_bear" value="{{ '%.2f'|format(defaults.fcfe_bear|float) }}" placeholder="{{ '%.2f'|format(defaults.fcfe_bear|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="fcfe_base">{{ scenario_names[1] }} Ratio</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="fcfe_base" name="fcfe_base" value="{{ '%.2f'|format(defaults.fcfe_base|float) }}" placeholder="{{ '%.2f'|format(defaults.fcfe_base|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="fcfe_bull">{{ scenario_names[2] }} Ratio</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="fcfe_bull" name="fcfe_bull" value="{{ '%.2f'|format(defaults.fcfe_bull|float) }}" placeholder="{{ '%.2f'|format(defaults.fcfe_bull|float) }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header">
+                <h5>Default Net Income Margins (%)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive small mb-3">
+                    {{ defaults.ni_margin_html | safe }}
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-md-4">
+                        <label for="nim_bear">{{ scenario_names[0] }} NI Margin</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="nim_bear" name="nim_bear" value="{{ '%.2f'|format(defaults.nim_bear|float) }}" placeholder="{{ '%.2f'|format(defaults.nim_bear|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="nim_base">{{ scenario_names[1] }} NI Margin</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="nim_base" name="nim_base" value="{{ '%.2f'|format(defaults.nim_base|float) }}" placeholder="{{ '%.2f'|format(defaults.nim_base|float) }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label for="nim_bull">{{ scenario_names[2] }} NI Margin</label>
+                        <input type="number" step="0.01" class="form-control form-control-sm" id="nim_bull" name="nim_bull" value="{{ '%.2f'|format(defaults.nim_bull|float) }}" placeholder="{{ '%.2f'|format(defaults.nim_bull|float) }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center">
+            <button type="submit" class="btn btn-success btn-lg mt-3">Calculate Final Intrinsic Value</button>
+            <br>
+            <a href="{{ url_for('views.value_stock_get_ticker_page') }}" class="btn btn-link mt-3">Cancel and Start Over</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

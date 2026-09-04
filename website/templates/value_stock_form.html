@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}WACC Calculator{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {# Title now includes the model type in brackets, just like the DCF form #}
+    <h2 class="text-center mb-4">WACC Calculator (Perpetual Growth)</h2>
+
+    {# The descriptive text is now shorter and more direct #}
+    <p class="text-center text-muted">
+        This model uses a perpetual growth rate to find a terminal value.
+    </p>
+
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <form method="POST" action="{{ form_action | default(url_for('views.value_stock_lookup_from_db')) }}" class="card p-4 shadow-sm">
+                <div class="form-group">
+                    <label for="ticker"><strong>Stock Ticker Symbol</strong></label>
+                    <input type="text" class="form-control form-control-lg" id="ticker" name="ticker" placeholder="E.g., AAPL, MSFT" value="{{ request.form.ticker if request.form.ticker else '' }}" autofocus required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block mt-3">Calculate</button>
+            </form>
+        </div>
+    </div>
+    <div class="row justify-content-center mt-2">
+        <div class="col-md-6 text-center">
+            <p class="text-muted" style="font-size: 0.9rem;">
+                <em>Disclaimer:</em> This valuation model may not be suitable for evaluating banks or financial institutions, which often use different valuation methods.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link
+          rel="stylesheet"
+          href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+          integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
+          crossorigin="anonymous"
+        />
+        <link
+          rel="stylesheet"
+          href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"
+          crossorigin="anonymous"
+        />
+
+        <title>{% block title %}Home{% endblock %}</title>
+        <style>
+            /* Existing styles... */
+            .navbar-custom {
+                background-color: #00674F;
+                position: sticky;
+                top: 0;
+                z-index: 1050;
+            }
+            .navbar-custom .navbar-brand,
+            .navbar-custom .nav-link {
+                color: white;
+            }
+            .navbar-custom .nav-link:hover,
+            .navbar-custom .nav-link:focus {
+                color: #f0f0f0;
+            }
+            .nav-underline .nav-link {
+                padding-bottom: 0.35rem;
+                border-bottom: 2px solid transparent;
+                transition: border-bottom-color 0.2s ease-in-out;
+            }
+            .nav-underline .nav-link:hover,
+            .nav-underline .nav-link:focus,
+            .nav-underline .nav-link.active {
+                border-bottom-color: white;
+            }
+            .navbar-custom .nav-pills .nav-link.active,
+            .navbar-custom .nav-pills .show > .nav-link {
+                background-color: #cefad0;
+                color: #00674F;
+                border-radius: 0.25rem;
+            }
+            .navbar-custom .nav-pills .nav-link {
+                color: white;
+                margin-right: 2px; 
+                border-radius: 0.25rem; 
+                transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+            }
+            .navbar-custom .nav-pills .nav-link:not(.active):hover,
+            .navbar-custom .nav-pills .nav-link:not(.active):focus {
+                background-color: rgba(255, 255, 255, 0.2);
+                color: white;
+            }
+            .navbar-logo-circle {
+                border-radius: 50%;
+                object-fit: cover;
+            }
+            .navbar-brand-text {
+                margin-left: -30px;
+            }
+            html, body {
+                height: 100%;
+                margin: 0;
+            }
+            body {
+                display: flex;
+                flex-direction: column;
+            }
+            .navbar-custom {
+                flex-shrink: 0;
+            }
+            .page-content-wrapper {
+                flex-grow: 1;
+                display: flex;
+                flex-direction: column;
+            }
+            .login-background {
+                background-size: cover;
+                background-position: center center;
+                background-repeat: no-repeat;
+                flex-grow: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                padding: 2rem 1.5rem;
+                position: relative;
+            }
+            .login-background::before {
+                content: "";
+                position: absolute;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background-color: rgba(0, 0, 0, 0.75);
+                z-index: 1;
+            }
+            .login-background > .text-center,
+            .login-background > .login-content {
+                position: relative;
+                z-index: 2;
+                width: 100%;
+                max-width: 500px;
+            }
+            .login-background h1,
+            .login-background h3,
+            .login-background label,
+            .login-background p {
+                color: #ffffff !important;
+            }
+            .login-background a {
+                color: #90caf9 !important;
+                font-weight: bold;
+            }
+            .login-background a:hover {
+                color: #b3e5fc !important;
+            }
+            .login-background .form-control::placeholder {
+                color: #d1d1d1; opacity: 1;
+            }
+            .login-background .form-control:-ms-input-placeholder { color: #d1d1d1; }
+            .login-background .form-control::-ms-input-placeholder { color: #d1d1d1; }
+            .navbar-custom .navbar-toggler-icon {
+                background-image: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='rgba(255, 255, 255, 0.8)' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M4 7h22M4 15h22M4 23h22'/%3E%3C/svg%3E");
+            }
+            .navbar-custom .navbar-toggler {
+                border-color: rgba(255, 255, 255, 0.1);
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="navbar navbar-custom navbar-expand-lg shadow-sm fixed-top">
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename='images/icon.png') }}" alt="Quantarize Logo"
+                     width="35"  height="35" class="d-inline-block align-text-top mr-2 navbar-logo-circle">
+                <span class="navbar-brand-text">Quantarize</span>
+            </a>
+            <button
+                class="navbar-toggler"
+                type="button"
+                data-toggle="collapse"
+                data-target="#navbar"
+            >
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbar">
+                <ul class="navbar-nav nav-pills mr-auto">
+                    {% if current_user.is_authenticated %} <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'views.home' %}active{% endif %}" id="home" href="{{ url_for('views.home') }}">Home</a>
+                        </li>
+                        <li class="nav-item">
+                            {% set stock_valuation_endpoints = [
+                                'views.value_stock_get_ticker_page',
+                                'views.value_stock_get_overrides_page',
+                                'views.value_stock_lookup_from_db',
+                                'views.update_valuation_results_db',
+                                'views.reset_valuation_defaults_db'
+                            ] %}
+                            <a class="nav-link {% if request.endpoint in stock_valuation_endpoints %}active{% endif %}" id="waccCalculator" href="{{ url_for('views.value_stock_get_ticker_page') }}">WACC Calculator</a>
+                        </li>
+                        <li class="nav-item">
+                            {% set dcf_endpoints = [
+                                'views.finite_horizon_dcf_form',
+                                'views.finite_horizon_overrides',
+                                'views.finite_horizon_dcf_calculate',
+                                'views.update_finite_horizon_valuation',
+                                'views.reset_finite_horizon_defaults'
+                            ] %}
+                            <a class="nav-link {% if request.endpoint in dcf_endpoints %}active{% endif %}" id="dcfCalculator" href="{{ url_for('views.finite_horizon_dcf_form') }}">DCF Calculator</a>
+                        </li>
+                    {% endif %}
+                </ul>
+
+                <ul class="navbar-nav nav-pills align-items-center">
+                    {% if current_user.is_authenticated %}
+                        <li class="nav-item">
+                          <a class="nav-link" href="{{ url_for('views.valuation_summary') }}">
+                            <i class="fa fa-table"></i> Valuation Summary
+                          </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="logout" href="{{ url_for('auth.logout') }}">Logout</a>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'auth.login' %}active{% endif %}" id="login" href="{{ url_for('auth.login') }}">Login</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'auth.sign_up' %}active{% endif %}" id="signUp" href="{{ url_for('auth.sign_up') }}">Sign Up</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </nav>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            {% if category == 'error' %}
+            <div class="alert alert-danger alert-dismissible fade show" role="alert"> {{ message }}
+             <button type="button" class="close" data-dismiss="alert">
+                 <span aria-hidden="true">&times;</span>
+             </button>
+            </div>
+            {% elif category == 'warning' %}
+            <div class="alert alert-warning alert-dismissible fade show" role="alert"> {{ message }}
+             <button type="button" class="close" data-dismiss="alert">
+                 <span aria-hidden="true">&times;</span>
+             </button>
+            </div>
+            {% else %}
+            <div class="alert alert-success alert-dismissible fade show" role="alert"> {{ message }}
+             <button type="button" class="close" data-dismiss="alert">
+                 <span aria-hidden="true">&times;</span>
+             </button>
+            </div>
+            {% endif %}
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="page-content-wrapper">
+        {% block content %}
+        {% endblock %}
+        </div>
+        <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+        <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+
+        <script
+            type="text/javascript"
+            src="{{ url_for('static', filename='index.js') }}"
+        ></script>
+        <script>
+            // Your existing password toggle script
+            document.addEventListener('DOMContentLoaded', function() {
+                const togglePasswordSpans = document.querySelectorAll('.password-toggle');
+                togglePasswordSpans.forEach(function(toggleSpan) {
+                    toggleSpan.addEventListener('click', function() {
+                        const targetId = this.dataset.target;
+                        const passwordField = document.getElementById(targetId);
+                        const icon = this.querySelector('i.fa');
+                        if (passwordField && icon) {
+                            if (passwordField.type === "password") {
+                                passwordField.type = "text";
+                                icon.classList.remove("fa-eye-slash");
+                                icon.classList.add("fa-eye");
+                            } else {
+                                passwordField.type = "password";
+                                icon.classList.remove("fa-eye");
+                                icon.classList.add("fa-eye-slash");
+                            }
+                        }
+                    });
+                });
+            });
+            // Export table global function for navbar button
+            function exportValuationTable() {
+                let table = document.querySelector('.table-responsive table');
+                if(!table) return;
+                let csv = [];
+                for(let row of table.rows) {
+                    let rowData = [];
+                    for(let cell of row.cells) {
+                        let val = cell.innerText.replace(/"/g, '""');
+                        rowData.push('"' + val + '"');
+                    }
+                    csv.push(rowData.join(','));
+                }
+                let csvString = csv.join('\n');
+                let blob = new Blob([csvString], { type: 'text/csv' });
+                let link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'valuation_table.csv';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        </script>
+
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
+
+        <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    </body>
+</html>
