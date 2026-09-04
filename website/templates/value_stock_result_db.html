@@ -392,7 +392,6 @@
             <th>Growth Input</th>
             <th>Current App Model</th>
             <th>FCFF Baseline</th>
-            <th>Gap vs Current</th>
           </tr>
         </thead>
         <tbody>
@@ -403,7 +402,6 @@
             <td>{{ benchmark_row.growth_rate_pct|round(2) if benchmark_row.growth_rate_pct is not none else "N/A" }}%</td>
             <td>{{ "$%.2f"|format(benchmark_row.legacy_value) if benchmark_row.legacy_value is not none else "N/A" }}</td>
             <td>{{ "$%.2f"|format(benchmark_row.fcff_value) if benchmark_row.fcff_value is not none else "N/A" }}</td>
-            <td>{{ "%+.1f%%"|format(benchmark_row.gap_pct) if benchmark_row.gap_pct is not none else "N/A" }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -431,10 +429,20 @@
       Latest stored free cash flow: <strong>{{ "{:,.0f}".format(latest_financial_fcff) if latest_financial_fcff is not none else "N/A" }}</strong>
       {% if latest_financial_year %}from FY{{ latest_financial_year }}{% endif %}
       {% if latest_total_debt is not none %} · Debt used: <strong>{{ "{:,.0f}".format(latest_total_debt) }}</strong>{% endif %}
+      {% if fcff_benchmark.shares_outstanding is not none %} · Shares used: <strong>{{ "{:,.0f}".format(fcff_benchmark.shares_outstanding) }}</strong>{% endif %}
+      {% if benchmark_market_date %} · Shares/debt snapshot: <strong>{{ benchmark_market_date }}</strong>{% endif %}
     </p>
+    <div class="mt-2 text-muted">
+      <p class="mb-1">FCFF baseline outputs are shown on a per-share basis using FX factor <strong>{{ "%.4f"|format(fcff_benchmark.fx_rate) }}</strong>.</p>
+      <ul class="mb-0">
+        <li>The raw free-cash-flow, debt, and share-count inputs remain stored source inputs.</li>
+        <li>The FX factor is still a spot lookup, not a period-aligned historical FX series.</li>
+        <li>Use this benchmark directionally until the app stores an explicit reporting-currency bridge and tighter period alignment.</li>
+      </ul>
+    </div>
     {% else %}
     <div class="alert alert-warning mb-0">
-      FCFF baseline is unavailable for this ticker because the current dataset does not yet provide a clean free-cash-flow, discount-rate, or share-count input set.
+      FCFF baseline is unavailable for this ticker because the current dataset does not yet provide a clean period-aligned free-cash-flow, debt, and share-count input set.
     </div>
     {% endif %}
   </div>

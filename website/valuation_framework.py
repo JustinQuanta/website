@@ -37,6 +37,15 @@ MODEL_FAMILIES = [
 ]
 
 
+def _safe_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_company_profile(stock_row, latest_financial_row):
     sector = ((stock_row or {}).get("sector") or "").strip()
     industry = ((stock_row or {}).get("industry") or "").strip()
@@ -56,8 +65,8 @@ def build_company_profile(stock_row, latest_financial_row):
         "industry": industry,
         "is_reit": is_reit,
         "is_financial": is_financial,
-        "has_negative_cash_flow": latest_fcf is not None and float(latest_fcf) < 0,
-        "has_negative_net_income": latest_net_income is not None and float(latest_net_income) < 0,
+        "has_negative_cash_flow": (_safe_float(latest_fcf) or 0.0) < 0,
+        "has_negative_net_income": (_safe_float(latest_net_income) or 0.0) < 0,
     }
 
 

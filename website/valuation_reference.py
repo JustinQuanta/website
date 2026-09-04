@@ -30,7 +30,9 @@ def calculate_two_stage_fcff_per_share(
 
     if latest_fcff is None or growth_rate_pct is None or discount_rate is None:
         return None
-    if shares_outstanding in (None, 0) or fx_rate == 0:
+    if shares_outstanding is None or shares_outstanding <= 0 or fx_rate <= 0:
+        return None
+    if discount_rate <= 0:
         return None
     if discount_rate <= terminal_growth_rate:
         return None
@@ -48,7 +50,7 @@ def calculate_two_stage_fcff_per_share(
     enterprise_value = present_value + (terminal_value / ((1 + discount_rate) ** projection_years))
     equity_value = enterprise_value - total_debt
 
-    return equity_value / (shares_outstanding * fx_rate)
+    return (equity_value * fx_rate) / shares_outstanding
 
 
 def build_fcff_reference_benchmark(
@@ -68,6 +70,7 @@ def build_fcff_reference_benchmark(
         "latest_fcff": _to_float(latest_fcff),
         "total_debt": _to_float(total_debt) or 0.0,
         "shares_outstanding": _to_float(shares_outstanding),
+        "fx_rate": _to_float(fx_rate) or 1.0,
         "discount_rate_pct": (_to_float(discount_rate) or 0.0) * 100,
         "scenarios": {},
         "assumptions": [
@@ -91,15 +94,10 @@ def build_fcff_reference_benchmark(
             fx_rate=fx_rate,
         )
         legacy_value = _to_float((legacy_values or {}).get(scenario))
-        gap_pct = None
-        if fcff_value is not None and legacy_value not in (None, 0):
-            gap_pct = ((fcff_value - legacy_value) / abs(legacy_value)) * 100
-
         benchmark["scenarios"][scenario] = {
             "growth_rate_pct": _to_float(growth_rate),
             "fcff_value": fcff_value,
             "legacy_value": legacy_value,
-            "gap_pct": gap_pct,
         }
 
     benchmark["available"] = any(
