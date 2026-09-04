@@ -1,1 +1,10 @@
-
+streamlit
+Flask
+Flask-Login
+Flask-SQLAlchemy
+werkzeug
+python-dotenv
+pandas
+numpy
+yfinance
+requests
